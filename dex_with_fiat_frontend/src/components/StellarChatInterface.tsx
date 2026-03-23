@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Wallet, LogOut, Moon, Sun, Menu, X, Plus, Star } from 'lucide-react';
 import { useStellarWallet } from '@/contexts/StellarWalletContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -20,6 +20,14 @@ export default function StellarChatInterface() {
     const [showSidebar, setShowSidebar] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [defaultAmount, setDefaultAmount] = useState('');
+    const [isMobile, setIsMobile] = useState(false);
+    const [isSheetMounted, setIsSheetMounted] = useState(false);
+
+    const sheetRef = useRef<HTMLDivElement>(null);
+    const dragStartY = useRef(0);
+    const dragDelta = useRef(0);
+    const isDragging = useRef(false);
+    const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const {
         messages,
@@ -29,6 +37,106 @@ export default function StellarChatInterface() {
         loadChatSession,
         setTransactionReadyCallback,
     } = useChat();
+
+    // Track viewport width to switch between sidebar and bottom-sheet
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    // On viewport change, close whichever panel is open to avoid stale state
+    useEffect(() => {
+        setShowSidebar(false);
+        setIsSheetMounted(false);
+    }, [isMobile]);
+
+    // Mount the bottom-sheet when the user opens it on mobile
+    useEffect(() => {
+        if (showSidebar && isMobile) {
+            setIsSheetMounted(true);
+        }
+    }, [showSidebar, isMobile]);
+
+    // Slide the sheet up after it mounts
+    useEffect(() => {
+        if (!isSheetMounted || !sheetRef.current) return;
+        const el = sheetRef.current;
+        el.style.transform = 'translateY(100%)';
+        const raf = requestAnimationFrame(() => {
+            el.style.transition = 'transform 300ms cubic-bezier(0.32, 0.72, 0, 1)';
+            el.style.transform = 'translateY(0)';
+        });
+        return () => cancelAnimationFrame(raf);
+    }, [isSheetMounted]);
+
+    // Focus the sheet for keyboard/screen-reader users
+    useEffect(() => {
+        if (isSheetMounted && sheetRef.current) {
+            sheetRef.current.focus();
+        }
+    }, [isSheetMounted]);
+
+    // Dismiss on Escape key
+    useEffect(() => {
+        if (!isSheetMounted) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') closeSheet();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    // closeSheet is stable (useCallback with no deps that change), safe to omit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSheetMounted]);
+
+    useEffect(() => {
+        return () => {
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        };
+    }, []);
+
+    const closeSheet = useCallback(() => {
+        if (sheetRef.current) {
+            sheetRef.current.style.transition = 'transform 300ms cubic-bezier(0.32, 0.72, 0, 1)';
+            sheetRef.current.style.transform = 'translateY(100%)';
+        }
+        closeTimerRef.current = setTimeout(() => {
+            setIsSheetMounted(false);
+            setShowSidebar(false);
+        }, 300);
+    }, []);
+
+    const handleSheetTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+        dragStartY.current = e.touches[0].clientY;
+        dragDelta.current = 0;
+        isDragging.current = true;
+        if (sheetRef.current) {
+            sheetRef.current.style.transition = 'none';
+        }
+    }, []);
+
+    const handleSheetTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+        if (!isDragging.current || !sheetRef.current) return;
+        const delta = e.touches[0].clientY - dragStartY.current;
+        dragDelta.current = delta;
+        // Only allow downward drag
+        if (delta > 0) {
+            sheetRef.current.style.transform = `translateY(${delta}px)`;
+        }
+    }, []);
+
+    const handleSheetTouchEnd = useCallback(() => {
+        if (!isDragging.current) return;
+        isDragging.current = false;
+        if (dragDelta.current > 120) {
+            closeSheet();
+        } else if (sheetRef.current) {
+            sheetRef.current.style.transition = 'transform 300ms cubic-bezier(0.32, 0.72, 0, 1)';
+            sheetRef.current.style.transform = 'translateY(0)';
+        }
+        dragDelta.current = 0;
+    }, [closeSheet]);
 
     // When the AI decides a transaction is ready, open the modal
     const handleTransactionReady = useCallback((data: TransactionData) => {
@@ -71,21 +179,18 @@ export default function StellarChatInterface() {
 
     return (
         <div className={`flex h-screen w-screen overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
-            {/* Sidebar */}
-            {showSidebar && (
-    <div className="flex-shrink-0 w-72">
-        {isLoading ? (
-            <SkeletonSidebar />
-        ) : (
-            <ChatHistorySidebar 
-                onLoadSession={(id) => { 
-                    loadChatSession(id); 
-                    setShowSidebar(false); 
-                }} 
-            />
-        )}
-    </div>
-)}
+            {/* Desktop sidebar — only rendered on md+ viewports */}
+            {!isMobile && showSidebar && (
+                <div className="shrink-0 w-72">
+                    {isLoading ? (
+                        <SkeletonSidebar />
+                    ) : (
+                        <ChatHistorySidebar
+                            onLoadSession={(id) => { loadChatSession(id); setShowSidebar(false); }}
+                        />
+                    )}
+                </div>
+            )}
             {/* Main */}
             <div className="flex flex-col flex-1 min-w-0">
                 {/* Header */}
@@ -189,6 +294,46 @@ export default function StellarChatInterface() {
                     />
                 </div>
             </div>
+
+            {/* Mobile bottom-sheet — only rendered when isSheetMounted */}
+            {isSheetMounted && (
+                <>
+                    {/* Backdrop */}
+                    <div
+                        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+                        onClick={closeSheet}
+                        aria-hidden="true"
+                    />
+
+                    {/* Sheet */}
+                    <div
+                        ref={sheetRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Chat history"
+                        tabIndex={-1}
+                        className={`fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-2xl max-h-[85svh] will-change-transform focus:outline-none ${
+                            isDarkMode ? 'bg-gray-800' : 'bg-white'
+                        }`}
+                        onTouchStart={handleSheetTouchStart}
+                        onTouchMove={handleSheetTouchMove}
+                        onTouchEnd={handleSheetTouchEnd}
+                    >
+                        {/* Drag handle */}
+                        <div
+                            className="flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing"
+                            aria-hidden="true"
+                        >
+                            <div className={`w-10 h-1 rounded-full ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                        </div>
+
+                        <ChatHistorySidebar
+                            onLoadSession={(id) => { loadChatSession(id); closeSheet(); }}
+                            onClose={closeSheet}
+                        />
+                    </div>
+                </>
+            )}
 
             {/* Deposit / Withdraw Modal */}
             <StellarFiatModal

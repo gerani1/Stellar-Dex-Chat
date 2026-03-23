@@ -16,9 +16,10 @@ import SkeletonSidebar from "@/components/ui/skeleton/SkeletonSidebar";
 
 interface ChatHistorySidebarProps {
     onLoadSession: (sessionId: string) => void;
+    onClose?: () => void;
 }
 
-export default function ChatHistorySidebar({ onLoadSession }: ChatHistorySidebarProps) {
+export default function ChatHistorySidebar({ onLoadSession, onClose }: ChatHistorySidebarProps) {
     const {
         sessions,
         currentSessionId,
@@ -88,16 +89,31 @@ export default function ChatHistorySidebar({ onLoadSession }: ChatHistorySidebar
                 <div className="flex items-center justify-between mb-4">
                     <h2 className={`text-lg font-semibold transition-colors duration-300 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'
                         }`}>Chat History</h2>
-                    <button
-                        onClick={clearAllHistory}
-                        className={`p-2 rounded-lg transition-all duration-200 hover:scale-110 ${isDarkMode
-                                ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/20'
-                                : 'text-gray-500 hover:text-red-600 hover:bg-red-50'
-                            }`}
-                        title="Clear all history"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={clearAllHistory}
+                            className={`p-2 rounded-lg transition-all duration-200 hover:scale-110 ${isDarkMode
+                                    ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/20'
+                                    : 'text-gray-500 hover:text-red-600 hover:bg-red-50'
+                                }`}
+                            title="Clear all history"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                        {onClose && (
+                            <button
+                                onClick={onClose}
+                                className={`p-2 rounded-lg transition-all duration-200 hover:scale-110 ${isDarkMode
+                                        ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
+                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                    }`}
+                                title="Close"
+                                aria-label="Close chat history"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Search */}
