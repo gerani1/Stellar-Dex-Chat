@@ -167,10 +167,10 @@ export default function StellarChatInterface() {
     setShowBankDetails(true);
   }, []);
 
-  // Register the callback once
-  useState(() => {
+  // Register the callback in useEffect to ensure it runs reliably
+  useEffect(() => {
     setTransactionReadyCallback(handleTransactionReady);
-  });
+  }, [handleTransactionReady, setTransactionReadyCallback]);
 
   const handleActionClick = useCallback(
     (actionId: string, actionType: string) => {

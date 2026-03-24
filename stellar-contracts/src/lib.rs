@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Symbol, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Bytes, Env,
+    Symbol, Vec,
 };
 
 // ── Error codes ───────────────────────────────────────────────────────────
@@ -18,6 +19,11 @@ pub enum Error {
     RequestNotFound = 8,
     TokenNotWhitelisted = 9,
     ReferenceTooLong = 10,
+    ReferenceTooLong = 9,
+    DailyLimitExceeded = 10,
+    BatchTooLarge = 11,
+    CooldownActive = 9,
+    NotAllowed = 9,
 }
 
 // ── Models ────────────────────────────────────────────────────────────────
@@ -47,8 +53,18 @@ pub struct Receipt {
     pub reference: Bytes,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawEntry {
+    pub to: Address,
+    pub amount: i128,
+}
+
 /// Maximum allowed length for a deposit reference (bytes).
 const MAX_REFERENCE_LEN: u32 = 64;
+
+/// Maximum number of entries allowed in a single batch withdrawal.
+const MAX_BATCH_SIZE: u32 = 25;
 
 // ── Storage keys ──────────────────────────────────────────────────────────
 #[contracttype]
@@ -56,12 +72,43 @@ pub enum DataKey {
     Admin,
     Token,
     LockPeriod,
+    CooldownLedgers,
+    LastDeposit(Address),
     WithdrawQueue(u64),
     NextRequestID,
     TokenRegistry(Address),
     ReceiptCounter,
     Receipt(u64),
+    DailyWithdrawLimit,
+    WindowStart,
+    WindowWithdrawn,
+    AllowlistEnabled,
+    Allowed(Address),
 }
+
+// ── Events ────────────────────────────────────────────────────────────────
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistToggled {
+    pub enabled: bool,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistAddrAdded {
+    #[topic]
+    pub addr: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistAddrRemoved {
+    #[topic]
+    pub addr: Address,
+}
+
+/// Approximate number of ledgers in a 24-hour window (5-second close time).
+const WINDOW_LEDGERS: u32 = 17_280;
 
 // ── Contract ──────────────────────────────────────────────────────────────
 #[contract]
@@ -104,11 +151,46 @@ impl FiatBridge {
         if reference.len() > MAX_REFERENCE_LEN {
             return Err(Error::ReferenceTooLong);
         }
+        // Allowlist gate: when enabled, only approved addresses may deposit.
+        let allowlist_on: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowlistEnabled)
+            .unwrap_or(false);
+        if allowlist_on {
+            if !env
+                .storage()
+                .persistent()
+                .has(&DataKey::Allowed(from.clone()))
+            {
+                return Err(Error::NotAllowed);
+            }
+        }
+
         if amount <= 0 {
             return Err(Error::ZeroAmount);
         }
 
         let mut config: TokenConfig = env
+        // ── Cooldown check ────────────────────────────────────────────
+        let cooldown: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CooldownLedgers)
+            .unwrap_or(0);
+        if cooldown > 0 {
+            if let Some(last) = env
+                .storage()
+                .temporary()
+                .get::<DataKey, u32>(&DataKey::LastDeposit(from.clone()))
+            {
+                if env.ledger().sequence() < last.saturating_add(cooldown) {
+                    return Err(Error::CooldownActive);
+                }
+            }
+        }
+
+        let limit: i128 = env
             .storage()
             .persistent()
             .get(&DataKey::TokenRegistry(token.clone()))
@@ -150,6 +232,15 @@ impl FiatBridge {
             .persistent()
             .set(&DataKey::TokenRegistry(token.clone()), &config);
 
+        // ── Record last deposit ledger in temporary storage ───────────
+        if cooldown > 0 {
+            let key = DataKey::LastDeposit(from);
+            env.storage()
+                .temporary()
+                .set(&key, &env.ledger().sequence());
+            env.storage()
+                .temporary()
+                .extend_ttl(&key, cooldown, cooldown);
         // ── Events ────────────────────────────────────────────────────
         env.events()
             .publish((Symbol::new(&env, "deposit"), from), amount);
@@ -243,6 +334,54 @@ impl FiatBridge {
         }
 
         let token_client = token::Client::new(&env, &request.token);
+        // ── Rolling daily withdrawal limit check ──────────────────────────
+        let daily_limit: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DailyWithdrawLimit)
+            .unwrap_or(0);
+        let new_window_withdrawn: Option<i128> = if daily_limit > 0 {
+            let current_seq = env.ledger().sequence();
+            // Persist WindowStart on first use so future resets can be detected.
+            let window_start: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::WindowStart)
+                .unwrap_or_else(|| {
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::WindowStart, &current_seq);
+                    current_seq
+                });
+            let window_withdrawn: i128 = if current_seq >= window_start + WINDOW_LEDGERS {
+                // Window has expired — start a fresh one.
+                env.storage()
+                    .instance()
+                    .set(&DataKey::WindowStart, &current_seq);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::WindowWithdrawn, &0_i128);
+                0
+            } else {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::WindowWithdrawn)
+                    .unwrap_or(0)
+            };
+            if window_withdrawn + request.amount > daily_limit {
+                return Err(Error::DailyLimitExceeded);
+            }
+            Some(window_withdrawn + request.amount)
+        } else {
+            None
+        };
+
+        let token_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_id);
 
         let balance = token_client.balance(&env.current_contract_address());
         if request.amount > balance {
@@ -254,6 +393,13 @@ impl FiatBridge {
             &request.to,
             &request.amount,
         );
+
+        // Persist the updated window total after a successful transfer.
+        if let Some(new_total) = new_window_withdrawn {
+            env.storage()
+                .instance()
+                .set(&DataKey::WindowWithdrawn, &new_total);
+        }
 
         env.storage()
             .persistent()
@@ -285,6 +431,24 @@ impl FiatBridge {
         Ok(())
     }
 
+    /// Set the maximum tokens that may be withdrawn within a rolling 24-hour window
+    /// (~17 280 ledgers). Setting to 0 disables the daily cap. Admin only.
+    pub fn set_daily_limit(env: Env, limit: i128) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        if limit < 0 {
+            return Err(Error::ZeroAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::DailyWithdrawLimit, &limit);
+        Ok(())
+    }
+
     /// Set the mandatory delay period for withdrawals (in ledgers). Admin only.
     pub fn set_lock_period(env: Env, ledgers: u32) -> Result<(), Error> {
         let admin: Address = env
@@ -299,6 +463,23 @@ impl FiatBridge {
 
     /// Update the per-deposit limit for a specific token. Admin only.
     pub fn set_limit(env: Env, token: Address, new_limit: i128) -> Result<(), Error> {
+    /// Set per-address deposit cooldown (in ledgers). Admin only.
+    /// A value of 0 disables cooldown checks.
+    pub fn set_cooldown(env: Env, ledgers: u32) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::CooldownLedgers, &ledgers);
+        Ok(())
+    }
+
+    /// Update the per-deposit limit. Admin only.
+    pub fn set_limit(env: Env, new_limit: i128) -> Result<(), Error> {
         if new_limit <= 0 {
             return Err(Error::ZeroAmount);
         }
@@ -464,6 +645,44 @@ impl FiatBridge {
             .persistent()
             .get(&DataKey::TokenRegistry(token))
     }
+    /// Get the configured daily withdrawal limit (0 = unlimited).
+    pub fn get_daily_limit(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DailyWithdrawLimit)
+            .unwrap_or(0)
+    }
+    /// Get the total tokens already withdrawn within the current window.
+    pub fn get_window_withdrawn(env: Env) -> i128 {
+        let current_seq = env.ledger().sequence();
+        let window_start: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::WindowStart)
+            .unwrap_or(current_seq);
+        if current_seq >= window_start + WINDOW_LEDGERS {
+            0
+        } else {
+            env.storage()
+                .instance()
+                .get(&DataKey::WindowWithdrawn)
+                .unwrap_or(0)
+        }
+    }
+    /// Get the tokens still available for withdrawal in the current window.
+    /// Returns i128::MAX when the daily limit is disabled (0).
+    pub fn get_window_remaining(env: Env) -> i128 {
+        let daily_limit: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DailyWithdrawLimit)
+            .unwrap_or(0);
+        if daily_limit == 0 {
+            return i128::MAX;
+        }
+        let withdrawn = Self::get_window_withdrawn(env);
+        (daily_limit - withdrawn).max(0)
+    }
 
     // ── Receipt view functions ─────────────────────────────────────────
 
@@ -514,6 +733,176 @@ impl FiatBridge {
             .instance()
             .get(&DataKey::ReceiptCounter)
             .unwrap_or(0)
+    }
+
+    /// Process multiple withdrawals atomically in a single transaction. Admin only.
+    ///
+    /// All entries are validated before any transfer occurs. If any entry has a
+    /// zero or negative amount, or the combined total exceeds the contract
+    /// balance, the entire call reverts. Batches larger than MAX_BATCH_SIZE are
+    /// rejected immediately.
+    pub fn batch_withdraw(env: Env, entries: Vec<WithdrawEntry>) -> Result<(), Error> {
+
+    /// Get the current per-address cooldown in ledgers.
+    pub fn get_cooldown(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CooldownLedgers)
+            .unwrap_or(0)
+    }
+
+    /// Get the last deposit ledger sequence for an address, if still live.
+    pub fn get_last_deposit_ledger(env: Env, address: Address) -> Option<u32> {
+        env.storage()
+            .temporary()
+            .get(&DataKey::LastDeposit(address))
+    // ── Allowlist management (admin-only) ─────────────────────────────
+
+    /// Enable or disable the deposit allowlist. Admin only.
+    pub fn set_allowlist_enabled(env: Env, enabled: bool) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistEnabled, &enabled);
+
+        AllowlistToggled { enabled }.publish(&env);
+        Ok(())
+    }
+
+    /// Add a single address to the deposit allowlist. Admin only.
+    pub fn allowlist_add(env: Env, addr: Address) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Allowed(addr.clone()), &true);
+
+        AllowlistAddrAdded { addr }.publish(&env);
+        Ok(())
+    }
+
+    /// Remove a single address from the deposit allowlist. Admin only.
+    pub fn allowlist_remove(env: Env, addr: Address) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Allowed(addr.clone()));
+
+        AllowlistAddrRemoved { addr }.publish(&env);
+        Ok(())
+    }
+
+    /// Bulk-add addresses to the deposit allowlist. Admin only.
+    pub fn allowlist_add_batch(env: Env, addrs: Vec<Address>) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        let entry_count = entries.len();
+        if entry_count > MAX_BATCH_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        // ── Validate all entries and compute total before touching balances ──
+        let mut total: i128 = 0;
+        for i in 0..entry_count {
+            let entry = entries.get(i).unwrap();
+            if entry.amount <= 0 {
+                return Err(Error::ZeroAmount);
+            }
+            total += entry.amount;
+        }
+
+        let token_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_id);
+
+        let balance = token_client.balance(&env.current_contract_address());
+        if total > balance {
+            return Err(Error::InsufficientFunds);
+        }
+
+        // ── Execute transfers ─────────────────────────────────────────────
+        for i in 0..entry_count {
+            let entry = entries.get(i).unwrap();
+            token_client.transfer(
+                &env.current_contract_address(),
+                &entry.to,
+                &entry.amount,
+            );
+            env.events()
+                .publish((Symbol::new(&env, "withdraw"), entry.to), entry.amount);
+        }
+
+        env.events()
+            .publish((Symbol::new(&env, "batch_complete"),), total);
+
+        Ok(())
+        for addr in addrs.iter() {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Allowed(addr.clone()), &true);
+            AllowlistAddrAdded { addr }.publish(&env);
+        }
+        Ok(())
+    }
+
+    /// Bulk-remove addresses from the deposit allowlist. Admin only.
+    pub fn allowlist_remove_batch(env: Env, addrs: Vec<Address>) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        for addr in addrs.iter() {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Allowed(addr.clone()));
+            AllowlistAddrRemoved { addr }.publish(&env);
+        }
+        Ok(())
+    }
+
+    // ── Allowlist view functions ───────────────────────────────────────
+
+    /// Check whether a given address is on the allowlist.
+    pub fn is_allowed(env: Env, addr: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Allowed(addr))
+    }
+
+    /// Check whether the deposit allowlist is currently enabled.
+    pub fn get_allowlist_enabled(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AllowlistEnabled)
+            .unwrap_or(false)
     }
 }
 
