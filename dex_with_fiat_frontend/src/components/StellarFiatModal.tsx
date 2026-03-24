@@ -22,6 +22,7 @@ interface StellarFiatModalProps {
   defaultAmount?: string;
   isAdminMode?: boolean;
   recipientAddress?: string;
+  onDepositSuccess?: (xlmAmount: number) => void;
 }
 
 type TxStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -32,6 +33,7 @@ export default function StellarFiatModal({
   defaultAmount = '',
   isAdminMode = false,
   recipientAddress = '',
+  onDepositSuccess,
 }: StellarFiatModalProps) {
   const { connection, signTx } = useStellarWallet();
 
@@ -143,12 +145,23 @@ export default function StellarFiatModal({
             >
               {txHash}
             </a>
-            <button
-              onClick={handleClose}
-              className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors"
-            >
-              Close
-            </button>
+            {!isAdminMode && onDepositSuccess ? (
+              <button
+                onClick={() => {
+                  onDepositSuccess(parseFloat(amount || '0'));
+                }}
+                className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors"
+              >
+                Continue to Fiat Payout
+              </button>
+            ) : (
+              <button
+                onClick={handleClose}
+                className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors"
+              >
+                Close
+              </button>
+            )}
           </div>
         ) : isLoadingUI ? (
           <SkeletonPayout />
