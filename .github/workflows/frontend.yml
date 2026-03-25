@@ -11,6 +11,9 @@ on:
     paths:
       - "dex_with_fiat_frontend/**"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Type Check

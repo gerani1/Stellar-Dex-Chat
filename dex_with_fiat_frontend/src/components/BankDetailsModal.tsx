@@ -9,8 +9,15 @@ import {
   ChevronRight,
   Search,
   Building2,
+  Trash2,
+  Edit2,
+  Save,
+  UserPlus,
+  Star,
 } from 'lucide-react';
 import { convertCryptoToFiat } from '@/lib/cryptoPriceService';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useBeneficiaries, Beneficiary } from '@/hooks/useBeneficiaries';
 
 interface Bank {
   id: number;
@@ -51,7 +58,25 @@ export default function BankDetailsModal({
   onClose,
   xlmAmount,
 }: BankDetailsModalProps) {
+  const {
+    beneficiaries,
+    isLoaded: beneficiariesLoaded,
+    addBeneficiary,
+    renameBeneficiary,
+    deleteBeneficiary,
+  } = useBeneficiaries();
+
+  const { addNotification } = useNotifications();
+
   const [step, setStep] = useState<Step>(1);
+
+  // Saved beneficiary selection
+  const [showSavedBeneficiaries, setShowSavedBeneficiaries] = useState(false);
+  const [selectedSavedBeneficiary, setSelectedSavedBeneficiary] = useState<Beneficiary | null>(null);
+  const [editingBeneficiaryId, setEditingBeneficiaryId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
+  const [saveCustomName, setSaveCustomName] = useState('');
 
   // Step 1 — bank selection
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -143,6 +168,7 @@ export default function BankDetailsModal({
     if (!selectedBank || !verifiedAccount) return;
     setPayoutLoading(true);
     setPayoutError('');
+    addNotification('payout_pending', 'Fiat payout request is pending...');
     try {
       // 1. Create Paystack transfer recipient
       const recipientRes = await fetch('/api/create-recipient', {
@@ -195,11 +221,14 @@ export default function BankDetailsModal({
       setTransferReference(
         transferJson.data.reference || transferJson.data.transfer_code || '',
       );
+      // Simulation block
+      await new Promise(resolve => setTimeout(resolve, 2500));
       setStep(4);
+      addNotification('payout_success', 'Fiat payout successfully completed!');
     } catch (err) {
-      setPayoutError(
-        err instanceof Error ? err.message : 'Payout failed. Please try again.',
-      );
+      const errorMsg = err instanceof Error ? err.message : 'Payout failed. Please try again.';
+      setPayoutError(errorMsg);
+      addNotification('payout_fail', `Payout failed: ${errorMsg}`);
     } finally {
       setPayoutLoading(false);
     }
@@ -222,7 +251,59 @@ export default function BankDetailsModal({
     setPayoutLoading(false);
     setPayoutError('');
     setTransferReference('');
+    setShowSavedBeneficiaries(false);
+    setSelectedSavedBeneficiary(null);
+    setEditingBeneficiaryId(null);
+    setEditingName('');
+    setShowSavePrompt(false);
+    setSaveCustomName('');
     onClose();
+  };
+
+  const handleSelectSavedBeneficiary = (beneficiary: Beneficiary) => {
+    setSelectedSavedBeneficiary(beneficiary);
+    const bank = banks.find((b) => b.id === beneficiary.bankId);
+    if (bank) {
+      setSelectedBank(bank);
+    }
+    setAccountNumber(beneficiary.accountNumber);
+    setVerifiedAccount({ account_name: beneficiary.accountName });
+    setShowSavedBeneficiaries(false);
+    setStep(3);
+  };
+
+  const handleStartRename = (beneficiary: Beneficiary) => {
+    setEditingBeneficiaryId(beneficiary.id);
+    setEditingName(beneficiary.name);
+  };
+
+  const handleSaveRename = (id: string) => {
+    if (editingName.trim()) {
+      renameBeneficiary(id, editingName.trim());
+    }
+    setEditingBeneficiaryId(null);
+    setEditingName('');
+  };
+
+  const handleDeleteBeneficiary = (id: string) => {
+    deleteBeneficiary(id);
+    if (selectedSavedBeneficiary?.id === id) {
+      setSelectedSavedBeneficiary(null);
+    }
+  };
+
+  const handleSaveBeneficiary = () => {
+    if (!selectedBank || !verifiedAccount) return;
+    addBeneficiary(
+      selectedBank.id,
+      selectedBank.name,
+      selectedBank.code,
+      accountNumber,
+      verifiedAccount.account_name,
+      saveCustomName || undefined,
+    );
+    setShowSavePrompt(false);
+    setSaveCustomName('');
   };
 
   if (!isOpen) return null;
@@ -270,19 +351,102 @@ export default function BankDetailsModal({
           </div>
         )}
 
-        {/* ── Step 1: Bank Selection ── */}
-        {step === 1 && (
-          <div>
-            <p className="text-sm text-gray-400 mb-4">Select your bank</p>
+    {/* ── Step 1: Bank Selection ── */}
+    {step === 1 && (
+      <div>
+        {/* Saved Beneficiaries Toggle */}
+        {beneficiariesLoaded && beneficiaries.length > 0 && (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setShowSavedBeneficiaries(!showSavedBeneficiaries)}
+              className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <Star className="w-4 h-4" />
+              Use saved beneficiary ({beneficiaries.length})
+              <ChevronRight className={`w-3 h-3 transition-transform ${showSavedBeneficiaries ? 'rotate-90' : ''}`} />
+            </button>
 
-            {banksLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+            {showSavedBeneficiaries && (
+              <div className="mt-2 max-h-40 overflow-y-auto space-y-1 pr-1">
+                {beneficiaries.map((beneficiary) => (
+                  <div
+                    key={beneficiary.id}
+                    className="flex items-center gap-2 bg-gray-800 rounded-lg p-2"
+                  >
+                    {editingBeneficiaryId === beneficiary.id ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          className="flex-1 bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRename(beneficiary.id)}
+                          className="p-1 text-green-400 hover:text-green-300"
+                        >
+                          <Save className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingBeneficiaryId(null)}
+                          className="p-1 text-gray-400 hover:text-gray-300"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSavedBeneficiary(beneficiary)}
+                          className="flex-1 text-left"
+                        >
+                          <p className="text-white text-sm font-medium">
+                            {beneficiary.name}
+                          </p>
+                          <p className="text-gray-400 text-xs">
+                            {beneficiary.bankName} · {beneficiary.accountNumber}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStartRename(beneficiary)}
+                          className="p-1 text-gray-400 hover:text-gray-300"
+                          title="Rename"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBeneficiary(beneficiary.id)}
+                          className="p-1 text-gray-400 hover:text-red-400"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
               </div>
-            ) : banksError ? (
-              <div className="flex items-center gap-2 text-red-400 text-sm py-4">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{banksError}</span>
+            )}
+          </div>
+        )}
+
+        <p className="text-sm text-gray-400 mb-4">Select your bank</p>
+
+        {banksLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          </div>
+        ) : banksError ? (
+          <div className="flex items-center gap-2 text-red-400 text-sm py-4">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{banksError}</span>
               </div>
             ) : (
               <>
@@ -380,17 +544,66 @@ export default function BankDetailsModal({
               </div>
             )}
 
-            {verifiedAccount && !verifying && (
-              <div className="flex items-center gap-2 text-green-400 text-sm mb-3 bg-green-400/10 rounded-lg px-3 py-2">
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                <span>
-                  Account name:{' '}
-                  <strong>{verifiedAccount.account_name}</strong>
-                </span>
-              </div>
+        {verifiedAccount && !verifying && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-green-400 text-sm mb-3 bg-green-400/10 rounded-lg px-3 py-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              <span>
+                Account name:{' '}
+                <strong>{verifiedAccount.account_name}</strong>
+              </span>
+            </div>
+
+            {/* Save beneficiary prompt */}
+            {!showSavePrompt && (
+              <button
+                type="button"
+                onClick={() => setShowSavePrompt(true)}
+                className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                Save beneficiary for future use
+              </button>
             )}
 
-            <div className="flex gap-3 mt-4">
+            {showSavePrompt && (
+              <div className="bg-gray-800 rounded-lg p-3 space-y-2">
+                <label className="block text-xs text-gray-400">
+                  Beneficiary name (optional)
+                </label>
+                <input
+                  type="text"
+                  value={saveCustomName}
+                  onChange={(e) => setSaveCustomName(e.target.value)}
+                  placeholder={verifiedAccount.account_name}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-sm"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveBeneficiary}
+                    className="flex-1 flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 rounded-lg transition-colors"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSavePrompt(false);
+                      setSaveCustomName('');
+                    }}
+                    className="px-3 py-2 text-gray-400 hover:text-white text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-3 mt-4">
               <button
                 type="button"
                 onClick={() => setStep(1)}

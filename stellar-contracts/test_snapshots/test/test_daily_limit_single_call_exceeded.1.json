@@ -64,6 +64,9 @@
                   "i128": "500"
                 },
                 {
+                  "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+                },
+                {
                   "bytes": ""
                 }
               ]
@@ -127,6 +130,9 @@
                 },
                 {
                   "i128": "200"
+                },
+                {
+                  "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 }
               ]
             }
@@ -266,6 +272,50 @@
               "key": {
                 "vec": [
                   {
+                    "symbol": "TokenRegistry"
+                  },
+                  {
+                    "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "limit"
+                    },
+                    "val": {
+                      "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_deposited"
+                    },
+                    "val": {
+                      "i128": "500"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
                     "symbol": "WithdrawQueue"
                   },
                   {
@@ -290,6 +340,14 @@
                     },
                     "val": {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "token"
+                    },
+                    "val": {
+                      "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                     }
                   },
                   {
@@ -339,18 +397,6 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "BridgeLimit"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "1000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
                             "symbol": "DailyWithdrawLimit"
                           }
                         ]
@@ -375,6 +421,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "Paused"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "ReceiptCounter"
                           }
                         ]
@@ -393,18 +451,6 @@
                       },
                       "val": {
                         "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TotalDeposited"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "500"
                       }
                     }
                   ]

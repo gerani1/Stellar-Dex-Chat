@@ -22,6 +22,7 @@ import {
   formatFiatAmount,
 } from '@/lib/cryptoPriceService';
 import SkeletonPayout from '@/components/ui/skeleton/SkeletonPayout';
+import { useNotifications } from '@/hooks/useNotifications';
 
 interface StellarFiatModalProps {
   isOpen: boolean;
@@ -34,6 +35,15 @@ interface StellarFiatModalProps {
 }
 
 type TxStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const PENDING_TX_KEY = 'stellar_pending_tx';
+
+interface PendingTxRecord {
+  hash: string;
+  amount: string;
+  isAdminMode: boolean;
+  recipient: string;
+}
 
 function parseAmountToStroops(value: string): bigint | null {
   const normalized = value.trim();
@@ -68,6 +78,7 @@ export default function StellarFiatModal({
   onDepositSuccess,
 }: StellarFiatModalProps) {
   const { connection, signTx } = useStellarWallet();
+  const { addNotification } = useNotifications();
 
   const [amount, setAmount] = useState(defaultAmount);
   const [activePreset, setActivePreset] = useState<number | null>(null);
@@ -109,6 +120,7 @@ export default function StellarFiatModal({
     setStatus('idle');
     setTxHash('');
     setErrorMsg('');
+    setFeeEstimate(null);
 
     if (isAdminMode) return;
     let cancelled = false;
@@ -120,6 +132,93 @@ export default function StellarFiatModal({
       cancelled = true;
     };
   }, [defaultAmount, isAdminMode, isOpen, recipientAddress]);
+
+  // Pending transaction recovery — runs after the reset effect above
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const stored = localStorage.getItem(PENDING_TX_KEY);
+    if (!stored) return;
+
+    let pending: PendingTxRecord;
+    try {
+      pending = JSON.parse(stored);
+    } catch {
+      localStorage.removeItem(PENDING_TX_KEY);
+      return;
+    }
+
+    setAmount(pending.amount);
+    setRecipient(pending.recipient);
+    setStatus('loading');
+    setErrorMsg('');
+    setTxHash('');
+
+    let cancelled = false;
+    pollTransaction(pending.hash)
+      .then((hash) => {
+        if (cancelled) return;
+        setTxHash(hash);
+        setStatus('success');
+        localStorage.removeItem(PENDING_TX_KEY);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setErrorMsg('Recovered transaction failed on-chain');
+        setStatus('error');
+        localStorage.removeItem(PENDING_TX_KEY);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !connection.isConnected) {
+      setFeeEstimate(null);
+      return;
+    }
+    const currentStroops = parseAmountToStroops(amount);
+    if (!currentStroops || currentStroops <= BigInt(0)) {
+      setFeeEstimate(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingFee(true);
+
+    const simulateTransaction = async () => {
+      try {
+        let estimate: FeeEstimate | null;
+        perf.mark('Tx: Simulation');
+        if (isAdminMode) {
+          const to = recipient || connection.publicKey;
+          estimate = await simulateWithdraw(connection.publicKey, to, currentStroops);
+        } else {
+          estimate = await simulateDeposit(connection.publicKey, currentStroops);
+        }
+        if (!cancelled) {
+          setFeeEstimate(estimate);
+          perf.measure('Tx: Simulation');
+        }
+      } catch {
+        if (!cancelled) {
+          setFeeEstimate(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingFee(false);
+        }
+      }
+    };
+
+    const debounceTimer = setTimeout(simulateTransaction, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounceTimer);
+    };
+  }, [amount, connection.isConnected, connection.publicKey, isAdminMode, isOpen, recipient]);
 
   // Live fiat estimate: recalculate whenever amount or fiatCurrency changes
   const updateFiatEstimate = useCallback(async () => {
@@ -201,7 +300,17 @@ export default function StellarFiatModal({
 
     setStatus('loading');
     setErrorMsg('');
+    perf.mark('Tx: Submission');
+
+    const onHashKnown = (hash: string) => {
+      localStorage.setItem(
+        PENDING_TX_KEY,
+        JSON.stringify({ hash, amount, isAdminMode, recipient } satisfies PendingTxRecord),
+      );
+    };
+
     try {
+      addNotification('tx_submit', `Submitting ${isAdminMode ? 'withdrawal' : 'deposit'} transaction...`);
       let hash: string;
       if (isAdminMode) {
         const to = recipient || connection.publicKey;
@@ -210,15 +319,18 @@ export default function StellarFiatModal({
           to,
           stroopsAmount,
           signTx,
+          onHashKnown,
         );
       } else {
         hash = await depositToContract(
           connection.publicKey,
           stroopsAmount,
           signTx,
+          onHashKnown,
         );
       }
       setTxHash(hash);
+      perf.measure('Tx: Submission');
       setStatus('success');
       // After a successful write, refetch stats so UI shows updated values
       try {
@@ -229,6 +341,7 @@ export default function StellarFiatModal({
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Transaction failed');
       setStatus('error');
+      localStorage.removeItem(PENDING_TX_KEY);
     }
   };
 
@@ -342,13 +455,57 @@ export default function StellarFiatModal({
               />
             </div>
 
-            {/* Fiat estimate */}
-            {fiatEstimate && (
-              <p className="text-xs text-gray-400 -mt-2 mb-4">
-                ≈ <span className="text-white font-medium">{fiatEstimate}</span>{' '}
-                at current market rate
-              </p>
+      {/* Fiat estimate */}
+      {fiatEstimate && (
+        <p className="text-xs text-gray-400 -mt-2 mb-4">
+          ≈ <span className="text-white font-medium">{fiatEstimate}</span>{' '}
+          at current market rate
+        </p>
+      )}
+
+      {/* Simulation Details Panel */}
+      {(isLoadingFee || feeEstimate) && (
+        <div className="mb-4 rounded-xl border border-gray-700 bg-gray-800/40 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+              Simulation Results
+            </h3>
+            {isLoadingFee && (
+              <Loader2 className="w-3 h-3 text-blue-500 animate-spin" />
             )}
+          </div>
+          
+          <div className="space-y-2">
+            <div className="flex justify-between text-[11px]">
+              <span className="text-gray-500">Base Fee</span>
+              <span className="text-gray-300 font-mono">
+                {isLoadingFee ? '...' : feeEstimate ? `${feeEstimate.baseFee.toFixed(7)} XLM` : '0.0000100 XLM'}
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span className="text-gray-500">Resource Fee</span>
+              <span className="text-gray-300 font-mono">
+                {isLoadingFee ? '...' : feeEstimate ? `${feeEstimate.resourceFee.toFixed(7)} XLM` : '0.0000000 XLM'}
+              </span>
+            </div>
+            <div className="pt-2 mt-1 border-t border-gray-700/50 flex justify-between text-xs font-semibold">
+              <span className="text-gray-400">Total Network Fee</span>
+              <span className="text-blue-400 font-mono">
+                {isLoadingFee ? 'Calculating...' : feeEstimate ? `${feeEstimate.fee.toFixed(7)} XLM` : 'N/A'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDepositFlow && (
+        <div className="mb-4 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-3">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+              Bridge Capacity
+            </h3>
+            <div className={`w-2 h-2 rounded-full ${isOverLimit ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : isHighLimitUsage ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]'}`} />
+          </div>
 
             {isDepositFlow && (
               <div className="mb-4 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-3">

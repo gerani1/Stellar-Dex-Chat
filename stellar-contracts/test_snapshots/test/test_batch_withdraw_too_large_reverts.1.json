@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 31,
+    "address": 32,
     "nonce": 0,
     "mux_id": 0
   },
@@ -64,6 +64,9 @@
                   "i128": "100000"
                 },
                 {
+                  "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+                },
+                {
                   "bytes": ""
                 }
               ]
@@ -91,6 +94,27 @@
               "sub_invocations": []
             }
           ]
+        }
+      ]
+    ],
+    [],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "set_allowlist_enabled",
+              "args": [
+                {
+                  "bool": true
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
         }
       ]
     ],
@@ -223,6 +247,50 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegistry"
+                  },
+                  {
+                    "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "limit"
+                    },
+                    "val": {
+                      "i128": "100000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_deposited"
+                    },
+                    "val": {
+                      "i128": "100000"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "key": "ledger_key_contract_instance",
               "durability": "persistent",
               "val": {
@@ -247,12 +315,24 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "BridgeLimit"
+                            "symbol": "AllowlistEnabled"
                           }
                         ]
                       },
                       "val": {
-                        "i128": "100000"
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Paused"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
                       }
                     },
                     {
@@ -278,18 +358,6 @@
                       "val": {
                         "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                       }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TotalDeposited"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "100000"
-                      }
                     }
                   ]
                 }
@@ -299,6 +367,26 @@
           "ext": "v0"
         },
         "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "2032731177588607455"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
       },
       {
         "entry": {

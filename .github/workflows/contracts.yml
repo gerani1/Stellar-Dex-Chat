@@ -11,6 +11,9 @@ on:
     paths:
       - "stellar-contracts/**"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test & Build

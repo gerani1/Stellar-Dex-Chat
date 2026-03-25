@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Wallet, LogOut, Moon, Sun, Menu, X, Plus, Star, Settings } from 'lucide-react';
+import { Wallet, LogOut, Moon, Sun, Menu, X, Plus, Star, Settings, ChevronDown, User, AlertCircle } from 'lucide-react';
 import { useStellarWallet } from '@/contexts/StellarWalletContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import useChat from '@/hooks/useChat';
@@ -11,13 +11,16 @@ import ChatHistorySidebar from './ChatHistorySidebar';
 import StellarFiatModal from './StellarFiatModal';
 import BankDetailsModal from './BankDetailsModal';
 import UserSettings from './UserSettings';
+import NotificationsCenter from './NotificationsCenter';
 import { TransactionData } from '@/types';
 import SkeletonChat from '@/components/ui/skeleton/SkeletonChat';
 import SkeletonSidebar from '@/components/ui/skeleton/SkeletonSidebar';
 import { useUserPreferences } from '@/contexts/UserPreferencesContext';
+import { getAdmin } from '@/lib/stellarContract';
+import { getQueuedReadRequestsCount } from '@/lib/networkQueue';
 
 export default function StellarChatInterface() {
-  const { connection, connect, disconnect } = useStellarWallet();
+  const { connection, connect, disconnect, accounts, selectedAccountIndex, selectAccount, sessionExpired, clearSessionExpired } = useStellarWallet();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { fiatCurrency } = useUserPreferences();
 
@@ -29,6 +32,14 @@ export default function StellarChatInterface() {
   const [bankDetailsXlmAmount, setBankDetailsXlmAmount] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   const [isSheetMounted, setIsSheetMounted] = useState(false);
+   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isOnline, setIsOnline] = useState(
+    typeof window !== 'undefined' ? window.navigator.onLine : true,
+  );
+  const [queuedReadables, setQueuedReadables] = useState(0);
+  const accountDropdownRef = useRef<HTMLDivElement>(null);
 
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef(0);
@@ -43,15 +54,65 @@ export default function StellarChatInterface() {
     clearChat,
     loadChatSession,
     setTransactionReadyCallback,
+    setIsAdmin: setChatIsAdmin,
   } = useChat();
 
-  // Track viewport width to switch between sidebar and bottom-sheet
+   // Track viewport width to switch between sidebar and bottom-sheet
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true);
+      setQueuedReadables(getQueuedReadRequestsCount());
+    };
+    const onOffline = () => {
+      setIsOnline(false);
+      setQueuedReadables(getQueuedReadRequestsCount());
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', onOnline);
+      window.addEventListener('offline', onOffline);
+    }
+
+    // initial count
+    setQueuedReadables(getQueuedReadRequestsCount());
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', onOnline);
+        window.removeEventListener('offline', onOffline);
+      }
+    };
+  }, []);
+
+  // Check if current user is admin
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (connection.isConnected && connection.address) {
+        try {
+          const adminAddr = await getAdmin();
+          setIsAdmin(adminAddr === connection.address);
+        } catch (err: unknown) {
+          console.error('Failed to check admin role:', err instanceof Error ? err.message : 'Unknown error');
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
+    };
+    checkAdmin();
+  }, [connection.isConnected, connection.address]);
+
+  // Sync admin state to chat hook
+  useEffect(() => {
+    setChatIsAdmin(isAdmin);
+  }, [isAdmin, setChatIsAdmin]);
 
   // On viewport change, close whichever panel is open to avoid stale state
   useEffect(() => {
@@ -101,6 +162,19 @@ export default function StellarChatInterface() {
     return () => {
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        accountDropdownRef.current &&
+        !accountDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowAccountDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const closeSheet = useCallback(() => {
@@ -153,9 +227,10 @@ export default function StellarChatInterface() {
     dragDelta.current = 0;
   }, [closeSheet]);
 
-  // When the AI decides a transaction is ready, open the modal
+   // When the AI decides a transaction is ready, open the modal
   const handleTransactionReady = useCallback((data: TransactionData) => {
     if (data.amountIn) setDefaultAmount(data.amountIn);
+    setIsAdminMode(false); // AI flow currently defaults to deposit
     setShowModal(true);
   }, []);
 
@@ -178,7 +253,8 @@ export default function StellarChatInterface() {
         case 'connect_wallet':
           connect();
           break;
-        case 'confirm_fiat':
+         case 'confirm_fiat':
+          setIsAdminMode(false);
           setShowModal(true);
           break;
         case 'query':
@@ -270,6 +346,8 @@ export default function StellarChatInterface() {
               <Plus className="w-5 h-5" />
             </button>
 
+            <NotificationsCenter />
+
             <button
               onClick={() => setShowSettings(true)}
               title="Settings"
@@ -290,36 +368,83 @@ export default function StellarChatInterface() {
               )}
             </button>
 
-            {connection.isConnected ? (
-              <div className="flex items-center gap-2">
-                <div
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${isDarkMode ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-700'}`}
-                >
-                  <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                  <span className="font-mono">
-                    {connection.address.slice(0, 6)}…
-                    {connection.address.slice(-4)}
-                  </span>
-                </div>
-                <button
-                  onClick={disconnect}
-                  title="Disconnect"
-                  className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
+        {connection.isConnected ? (
+          <div className="flex items-center gap-2">
+            <div ref={accountDropdownRef} className="relative">
               <button
-                onClick={connect}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-sm font-medium rounded-lg transition-all"
+                onClick={() => accounts.length > 1 && setShowAccountDropdown(!showAccountDropdown)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isDarkMode ? 'bg-gray-800 text-gray-200 hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${accounts.length > 1 ? 'cursor-pointer' : 'cursor-default'}`}
               >
-                <Wallet className="w-4 h-4" />
-                Connect Freighter
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="font-mono">
+                  {connection.address.slice(0, 6)}…
+                  {connection.address.slice(-4)}
+                </span>
+                {accounts.length > 1 && (
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} />
+                )}
               </button>
-            )}
+              {showAccountDropdown && accounts.length > 1 && (
+                <div
+                  className={`absolute right-0 top-full mt-1 w-56 rounded-lg shadow-lg border z-50 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+                >
+                  <div className={`px-3 py-2 text-xs font-semibold border-b ${isDarkMode ? 'text-gray-400 border-gray-700' : 'text-gray-500 border-gray-200'}`}>
+                    Switch Account
+                  </div>
+                  {accounts.map((account, idx) => (
+                    <button
+                      key={account.address}
+                      onClick={() => {
+                        selectAccount(idx);
+                        setShowAccountDropdown(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${idx === selectedAccountIndex ? (isDarkMode ? 'bg-blue-900/50 text-blue-400' : 'bg-blue-50 text-blue-600') : (isDarkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-50')}`}
+                    >
+                      <User className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="font-mono truncate">
+                        {account.address.slice(0, 6)}…{account.address.slice(-4)}
+                      </span>
+                      {idx === selectedAccountIndex && (
+                        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-900/50' : 'bg-blue-100'}`}>
+                          Active
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={disconnect}
+              title="Disconnect"
+              className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={connect}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-sm font-medium rounded-lg transition-all"
+          >
+            <Wallet className="w-4 h-4" />
+            Connect Freighter
+          </button>
+        )}
           </div>
         </header>
+
+        {/* Network status */}
+        {!isOnline && (
+          <div
+            className="flex-shrink-0 justify-center py-1 text-xs font-medium text-red-100 bg-red-500/90"
+            role="status"
+            aria-live="polite"
+          >
+            Offline detected. Read-only operations are queued and will retry when online.
+            {queuedReadables > 0 ? ` (${queuedReadables} queued)` : ''}
+          </div>
+        )}
 
         {/* Network badge */}
         {connection.isConnected && (
@@ -331,9 +456,26 @@ export default function StellarChatInterface() {
               <span className="font-medium text-blue-400">
                 {connection.network || 'TESTNET'}
               </span>
-              {' · '}
+               {' · '}
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsAdminMode(true);
+                      setShowModal(true);
+                    }}
+                    className="text-blue-400 hover:text-blue-300 underline"
+                  >
+                    Withdraw XLM
+                  </button>
+                  {' · '}
+                </>
+              )}
               <button
-                onClick={() => setShowModal(true)}
+                onClick={() => {
+                  setIsAdminMode(false);
+                  setShowModal(true);
+                }}
                 className="text-blue-400 hover:text-blue-300 underline"
               >
                 Deposit XLM
@@ -407,12 +549,14 @@ export default function StellarChatInterface() {
       )}
 
       {/* Deposit / Withdraw Modal */}
-      <StellarFiatModal
+       <StellarFiatModal
         isOpen={showModal}
         onClose={() => {
           setShowModal(false);
           setDefaultAmount('');
+          setIsAdminMode(false);
         }}
+        isAdminMode={isAdminMode}
         defaultAmount={defaultAmount}
         fiatCurrency={fiatCurrency}
         onDepositSuccess={handleDepositSuccess}
@@ -425,11 +569,43 @@ export default function StellarChatInterface() {
         xlmAmount={bankDetailsXlmAmount}
       />
 
-      {/* Settings panel */}
-      <UserSettings
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
+  {/* Settings panel */}
+  <UserSettings
+    isOpen={showSettings}
+    onClose={() => setShowSettings(false)}
+  />
+
+  {/* Session expired banner */}
+  {sessionExpired && (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4">
+      <div className={`flex items-center gap-3 p-4 rounded-lg shadow-lg border ${isDarkMode ? 'bg-gray-800 border-yellow-600/50' : 'bg-white border-yellow-500'}`}>
+        <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
+        <div className="flex-1">
+          <p className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+            Wallet Session Expired
+          </p>
+          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+            Your wallet session has expired after 24 hours. Please reconnect to continue.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            clearSessionExpired();
+            connect();
+          }}
+          className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white transition-colors"
+        >
+          Reconnect
+        </button>
+        <button
+          onClick={clearSessionExpired}
+          className={`flex-shrink-0 p-1 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
     </div>
-  );
+  )}
+</div>
+);
 }

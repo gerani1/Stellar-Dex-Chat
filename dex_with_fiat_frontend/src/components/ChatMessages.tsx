@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChatMessage, SuggestedAction } from '@/types';
+import { ChatMessage } from '@/types';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   Wallet,

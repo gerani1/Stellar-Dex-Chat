@@ -804,6 +804,36 @@
                       "val": {
                         "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                       }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "UserDeposited"
+                          },
+                          {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "450"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "UserDeposited"
+                          },
+                          {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "600"
+                      }
                     }
                   ]
                 }
@@ -812,7 +842,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 535680
       },
       {
         "entry": {
@@ -1225,7 +1255,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 535680
       }
     ]
   },
