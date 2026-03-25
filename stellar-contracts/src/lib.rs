@@ -766,4 +766,5 @@ impl FiatBridge {
     }
 }
 
+#[cfg(any(test, feature = "testutils"))]
 mod test;
