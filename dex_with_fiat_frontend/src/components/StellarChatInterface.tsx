@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Wallet, LogOut, Moon, Sun, Menu, X, Plus, Star, Settings, ChevronDown, User, AlertCircle } from 'lucide-react';
-import { useStellarWallet } from '@/contexts/StellarWalletContext';
+import { useStellarWallet, EXPECTED_NETWORK } from '@/contexts/StellarWalletContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import useChat from '@/hooks/useChat';
 import ChatMessages from './ChatMessages';
@@ -20,7 +20,7 @@ import { getAdmin } from '@/lib/stellarContract';
 import { getQueuedReadRequestsCount } from '@/lib/networkQueue';
 
 export default function StellarChatInterface() {
-  const { connection, connect, disconnect, accounts, selectedAccountIndex, selectAccount, sessionExpired, clearSessionExpired } = useStellarWallet();
+  const { connection, connect, disconnect, accounts, selectedAccountIndex, selectAccount, sessionExpired, clearSessionExpired, isNetworkMismatch } = useStellarWallet();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { fiatCurrency } = useUserPreferences();
 
@@ -229,10 +229,11 @@ export default function StellarChatInterface() {
 
    // When the AI decides a transaction is ready, open the modal
   const handleTransactionReady = useCallback((data: TransactionData) => {
+    if (isNetworkMismatch) return;
     if (data.amountIn) setDefaultAmount(data.amountIn);
-    setIsAdminMode(false); // AI flow currently defaults to deposit
+    setIsAdminMode(false);
     setShowModal(true);
-  }, []);
+  }, [isNetworkMismatch]);
 
   // After a successful deposit, close the deposit modal and open bank details
   const handleDepositSuccess = useCallback((result: { xlmAmount: number; note?: string }) => {
@@ -254,6 +255,7 @@ export default function StellarChatInterface() {
           connect();
           break;
          case 'confirm_fiat':
+          if (isNetworkMismatch) break;
           setIsAdminMode(false);
           setShowModal(true);
           break;
@@ -280,7 +282,7 @@ export default function StellarChatInterface() {
           break;
       }
     },
-    [connect, sendMessage],
+    [connect, isNetworkMismatch, sendMessage],
   );
 
   return (
@@ -445,38 +447,71 @@ export default function StellarChatInterface() {
         {/* Network badge */}
         {connection.isConnected && (
           <div
-            className={`flex-shrink-0 flex justify-center py-1 text-xs ${isDarkMode ? 'bg-gray-800/50 text-gray-400' : 'bg-gray-50 text-gray-500'}`}
+            className={`flex-shrink-0 flex flex-col items-center gap-1 py-1.5 text-xs ${
+              isNetworkMismatch
+                ? 'bg-red-500/10 text-red-400'
+                : isDarkMode
+                  ? 'bg-gray-800/50 text-gray-400'
+                  : 'bg-gray-50 text-gray-500'
+            }`}
+            role="status"
+            aria-live="polite"
           >
-            <span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  isNetworkMismatch ? 'bg-red-500' : 'bg-green-500'
+                }`}
+              />
               Network:{' '}
-              <span className="font-medium text-blue-400">
-                {connection.network || 'TESTNET'}
+              <span
+                className={`font-medium ${
+                  isNetworkMismatch ? 'text-red-400' : 'text-blue-400'
+                }`}
+              >
+                {connection.network || 'Unknown'}
               </span>
-               {' · '}
-              {isAdmin && (
+              {isNetworkMismatch && (
+                <span className="font-semibold">
+                  (expected {EXPECTED_NETWORK})
+                </span>
+              )}
+              {!isNetworkMismatch && (
                 <>
+                  {' · '}
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setIsAdminMode(true);
+                          setShowModal(true);
+                        }}
+                        className="text-blue-400 hover:text-blue-300 underline"
+                      >
+                        Withdraw XLM
+                      </button>
+                      {' · '}
+                    </>
+                  )}
                   <button
                     onClick={() => {
-                      setIsAdminMode(true);
+                      setIsAdminMode(false);
                       setShowModal(true);
                     }}
                     className="text-blue-400 hover:text-blue-300 underline"
                   >
-                    Withdraw XLM
+                    Deposit XLM
                   </button>
-                  {' · '}
                 </>
               )}
-              <button
-                onClick={() => {
-                  setIsAdminMode(false);
-                  setShowModal(true);
-                }}
-                className="text-blue-400 hover:text-blue-300 underline"
-              >
-                Deposit XLM
-              </button>
             </span>
+            {isNetworkMismatch && (
+              <span className="flex items-center gap-1 text-[11px]">
+                <AlertCircle className="w-3.5 h-3.5" />
+                Deposits and withdrawals are disabled.
+                Switch to {EXPECTED_NETWORK} in Freighter: Settings → Network → {EXPECTED_NETWORK}.
+              </span>
+            )}
           </div>
         )}
 

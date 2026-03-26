@@ -22,6 +22,8 @@ const STORAGE_KEY_ADDRESS = 'stellar_address';
 const STORAGE_KEY_INDEX = 'stellar_selected_account_index';
 const STORAGE_KEY_TIMESTAMP = 'stellar_connection_timestamp';
 
+export const EXPECTED_NETWORK = 'TESTNET';
+
 declare global {
   interface Window {
     freighter?: {
@@ -73,6 +75,7 @@ interface StellarWalletContextType {
   sessionExpired: boolean;
   clearSessionExpired: () => void;
   mockConnect: (address: string) => void;
+  isNetworkMismatch: boolean;
 }
 
 const defaultConnection: StellarWalletConnection = {
@@ -97,6 +100,7 @@ const StellarWalletContext = createContext<StellarWalletContextType>({
   sessionExpired: false,
   clearSessionExpired: () => {},
   mockConnect: () => {},
+  isNetworkMismatch: false,
 });
 
 export function StellarWalletProvider({ children }: { children: ReactNode }) {
@@ -282,6 +286,11 @@ useEffect(() => {
   }
 }, [mockConnect]);
 
+const isNetworkMismatch =
+  connection.isConnected &&
+  connection.network !== '' &&
+  connection.network.toUpperCase() !== EXPECTED_NETWORK;
+
 return (
   <StellarWalletContext.Provider
     value={{
@@ -298,6 +307,7 @@ return (
       sessionExpired,
       clearSessionExpired,
       mockConnect,
+      isNetworkMismatch,
     }}
   >
     {children}
