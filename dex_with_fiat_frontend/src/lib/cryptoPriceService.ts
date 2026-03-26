@@ -220,6 +220,33 @@ export function clearPriceCache(): void {
   priceCache.clear();
 }
 
+export const QUOTE_LOCK_DURATION_MS = 120 * 1000; // 120 seconds
+
+export interface LockedQuote {
+  ngnAmount: number;
+  lockedAt: number;
+  expiresAt: number;
+}
+
+/**
+ * Fetch a one-time fiat quote and lock it for QUOTE_LOCK_DURATION_MS.
+ * The returned object carries the expiry timestamp so the UI can
+ * drive a countdown and gate the final submit.
+ */
+export async function fetchLockedQuote(
+  tokenSymbol: string,
+  amount: number,
+  fiatCurrency: string = 'ngn',
+): Promise<LockedQuote> {
+  const ngnAmount = await convertCryptoToFiat(tokenSymbol, amount, fiatCurrency);
+  const lockedAt = Date.now();
+  return {
+    ngnAmount,
+    lockedAt,
+    expiresAt: lockedAt + QUOTE_LOCK_DURATION_MS,
+  };
+}
+
 /**
  * Format a fiat amount with the correct locale and currency symbol.
  * Falls back to a plain number string if Intl is unavailable.

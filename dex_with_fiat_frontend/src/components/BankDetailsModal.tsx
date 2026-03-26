@@ -14,8 +14,10 @@ import {
   Save,
   UserPlus,
   Star,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
-import { convertCryptoToFiat } from '@/lib/cryptoPriceService';
+import { fetchLockedQuote, type LockedQuote } from '@/lib/cryptoPriceService';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useBeneficiaries, Beneficiary } from '@/hooks/useBeneficiaries';
 import { useTxHistory } from '@/hooks/useTxHistory';
@@ -99,8 +101,9 @@ export default function BankDetailsModal({
     useState<VerifyAccountData | null>(null);
 
   // Step 3 - confirm payout
-  const [ngnAmount, setNgnAmount] = useState<number | null>(null);
-  const [ngnLoading, setNgnLoading] = useState(false);
+  const [lockedQuote, setLockedQuote] = useState<LockedQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteSecondsLeft, setQuoteSecondsLeft] = useState(120);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutError, setPayoutError] = useState('');
   const [payoutNote, setPayoutNote] = useState('');
@@ -137,15 +140,38 @@ export default function BankDetailsModal({
       .finally(() => setBanksLoading(false));
   }, [isOpen]);
 
-  // Fetch NGN estimate when the user reaches step 3
+  // Fetch a locked quote when the user reaches step 3
+  const fetchQuote = useCallback(() => {
+    if (xlmAmount <= 0) return;
+    setQuoteLoading(true);
+    setLockedQuote(null);
+    fetchLockedQuote('XLM', xlmAmount, 'ngn')
+      .then((quote) => {
+        setLockedQuote(quote);
+        setQuoteSecondsLeft(120);
+      })
+      .catch(() => setLockedQuote(null))
+      .finally(() => setQuoteLoading(false));
+  }, [xlmAmount]);
+
   useEffect(() => {
-    if (step !== 3 || xlmAmount <= 0) return;
-    setNgnLoading(true);
-    convertCryptoToFiat('XLM', xlmAmount, 'ngn')
-      .then(setNgnAmount)
-      .catch(() => setNgnAmount(null))
-      .finally(() => setNgnLoading(false));
-  }, [step, xlmAmount]);
+    if (step !== 3) return;
+    fetchQuote();
+  }, [step, fetchQuote]);
+
+  // Countdown timer — ticks every second while the quote is live
+  useEffect(() => {
+    if (!lockedQuote || step !== 3) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(
+        0,
+        Math.ceil((lockedQuote.expiresAt - Date.now()) / 1000),
+      );
+      setQuoteSecondsLeft(remaining);
+      if (remaining === 0) clearInterval(interval);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockedQuote, step]);
 
   const filteredBanks = banks.filter((b) =>
     b.name.toLowerCase().includes(bankSearch.toLowerCase()),
@@ -183,7 +209,7 @@ export default function BankDetailsModal({
   }, [accountNumber, selectedBank]);
 
   const handleConfirmPayout = async () => {
-    if (!selectedBank || !verifiedAccount) return;
+    if (!selectedBank || !verifiedAccount || !lockedQuote || quoteSecondsLeft === 0) return;
     setPayoutLoading(true);
     setPayoutError('');
     setStatusEvents([]);
@@ -219,7 +245,7 @@ export default function BankDetailsModal({
       // 2. Initiate the NGN bank transfer
       // The route handler multiplies the amount by 100 before calling Paystack,
       // so we send the NGN value directly (not kobo).
-      const ngnValue = ngnAmount ?? xlmAmount * 1000;
+      const ngnValue = lockedQuote.ngnAmount;
       const transferRes = await fetch('/api/initiate-transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,13 +275,10 @@ export default function BankDetailsModal({
         status: 'completed',
         amount: String(xlmAmount),
         asset: 'XLM',
-        fiatAmount:
-          ngnAmount !== null
-            ? ngnAmount.toLocaleString('en-NG', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })
-            : undefined,
+        fiatAmount: lockedQuote.ngnAmount.toLocaleString('en-NG', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }),
         fiatCurrency: 'NGN',
         note: payoutNote.trim() || undefined,
         reference:
@@ -291,8 +314,9 @@ export default function BankDetailsModal({
     setVerifying(false);
     setVerifyError('');
     setVerifiedAccount(null);
-    setNgnAmount(null);
-    setNgnLoading(false);
+    setLockedQuote(null);
+    setQuoteLoading(false);
+    setQuoteSecondsLeft(120);
     setPayoutLoading(false);
     setPayoutError('');
     setPayoutNote('');
@@ -688,12 +712,12 @@ export default function BankDetailsModal({
 
               <div className="flex justify-between text-sm items-center">
                 <span className="theme-text-secondary">Estimated NGN</span>
-                {ngnLoading ? (
+                {quoteLoading ? (
                   <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-                ) : ngnAmount !== null ? (
+                ) : lockedQuote !== null ? (
                   <span className="theme-text-primary font-medium">
                     ₦
-                    {ngnAmount.toLocaleString('en-NG', {
+                    {lockedQuote.ngnAmount.toLocaleString('en-NG', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -702,6 +726,32 @@ export default function BankDetailsModal({
                   <span className="theme-text-muted">-</span>
                 )}
               </div>
+
+              {/* Quote lock countdown */}
+              {lockedQuote && (
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <span className="theme-text-muted flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    Quote locked
+                  </span>
+                  {quoteSecondsLeft > 0 ? (
+                    <span
+                      className={`font-mono font-medium tabular-nums ${
+                        quoteSecondsLeft > 30
+                          ? 'text-green-400'
+                          : quoteSecondsLeft > 10
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                      }`}
+                    >
+                      {String(Math.floor(quoteSecondsLeft / 60)).padStart(2, '0')}:
+                      {String(quoteSecondsLeft % 60).padStart(2, '0')}
+                    </span>
+                  ) : (
+                    <span className="text-red-400 font-medium">Expired</span>
+                  )}
+                </div>
+              )}
 
               <div className="theme-border border-t pt-3 space-y-3">
                 <div className="flex justify-between text-sm">
@@ -739,6 +789,25 @@ export default function BankDetailsModal({
               />
             </div>
 
+            {/* Quote expiry warning */}
+            {lockedQuote && quoteSecondsLeft === 0 && (
+              <div className="flex items-center justify-between gap-2 text-red-400 text-sm mb-4 bg-red-400/10 rounded-lg px-3 py-2 border border-red-400/30">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>Quote expired. Refresh to continue.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchQuote}
+                  disabled={quoteLoading}
+                  className="flex items-center gap-1 text-blue-400 hover:text-blue-300 whitespace-nowrap disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${quoteLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+            )}
+
             {payoutError && (
               <div className="theme-soft-danger flex items-center gap-2 text-sm mb-4 rounded-lg px-3 py-2 border">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -758,7 +827,7 @@ export default function BankDetailsModal({
               <button
                 type="button"
                 onClick={handleConfirmPayout}
-                disabled={payoutLoading}
+                disabled={payoutLoading || quoteLoading || !lockedQuote || quoteSecondsLeft === 0}
                 className="theme-primary-button flex-1 flex items-center justify-center gap-2 disabled:bg-blue-800 disabled:opacity-70 text-white py-3 rounded-lg font-medium transition-colors"
               >
                 {payoutLoading ? (
