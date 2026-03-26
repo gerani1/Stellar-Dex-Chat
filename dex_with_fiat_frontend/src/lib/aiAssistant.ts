@@ -6,6 +6,8 @@ import {
   TransactionData,
 } from '@/types';
 import { telemetry } from '@/lib/telemetry';
+import { parseMessage, mergeParserWithAI } from '@/lib/messageParser';
+import { findFAQMatch } from './faq';
 
 const genAI = new GoogleGenerativeAI(
   process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
@@ -15,8 +17,6 @@ type GuardrailMatch = {
   category: GuardrailCategory;
   reason: string;
 };
-
-import { findFAQMatch } from './faq';
 
 export class AIAssistant {
   private static guardrailCounts: Record<GuardrailCategory, number> = {
@@ -46,19 +46,30 @@ export class AIAssistant {
       if (faqMatch) {
         return {
           intent: faqMatch.intent,
-          confidence: 0.98, // High confidence for hardcoded FAQs
+          confidence: 0.98,
           extractedData: {},
           requiredQuestions: [],
           suggestedResponse: faqMatch.answer,
         };
       }
 
-      // 3. AI Analysis Fallback
+      // 3. Deterministic parser — runs before AI so numeric fields are reliable
+      const parserResult = parseMessage(message);
+
+      // 4. AI Analysis
       const prompt = this.buildAnalysisPrompt(message, context);
       const result = await this.model.generateContent(prompt);
       const response = result.response.text();
 
-      return this.parseAIResponse(response);
+      const aiResult = this.parseAIResponse(response);
+
+      // 5. Merge — parser takes precedence for numeric fields
+      aiResult.extractedData = mergeParserWithAI(
+        parserResult,
+        aiResult.extractedData,
+      );
+
+      return aiResult;
     } catch (error) {
       console.error('AI Analysis Error:', error);
       return {
@@ -303,13 +314,13 @@ Be conversational and helpful. Ask clarifying questions when information is miss
       unsupported_request:
         'I can only help with Stellar wallet, XLM conversion, and fiat off-ramp tasks in this app.',
       wallet_security:
-        'I can’t process or help expose private keys, seed phrases, or recovery credentials.',
+        'I can\u2019t process or help expose private keys, seed phrases, or recovery credentials.',
       compliance_evasion:
-        'I can’t help bypass KYC, AML, sanctions, or other compliance controls.',
+        'I can\u2019t help bypass KYC, AML, sanctions, or other compliance controls.',
       malicious_activity:
-        'I can’t assist with exploits, scams, phishing, or unauthorized access.',
+        'I can\u2019t assist with exploits, scams, phishing, or unauthorized access.',
       financial_guarantee:
-        'I can’t promise profits or provide unsafe guaranteed-return guidance.',
+        'I can\u2019t promise profits or provide unsafe guaranteed-return guidance.',
     }[category];
 
     return `**Request Blocked by Guardrails**
@@ -322,12 +333,11 @@ ${categoryLine}
 - Explain how the Stellar offramp works
 - Help connect your Freighter wallet safely
 
-Choose one of the next actions below and I’ll keep it moving.`;
+Choose one of the next actions below and I'll keep it moving.`;
   }
 
   private parseAIResponse(response: string): AIAnalysisResult {
     try {
-      // Extract JSON from response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
@@ -461,7 +471,7 @@ Be helpful and specific about what you need.
     const currentTime = new Date().toLocaleString();
     const estimatedCompletion = new Date(
       Date.now() + 15 * 60000,
-    ).toLocaleString(); // 15 minutes from now
+    ).toLocaleString();
 
     return `
 **STELLAR FIATBRIDGE CONVERSION RECEIPT**
@@ -506,7 +516,6 @@ Your financial freedom is our priority.
   }
 
   async generateMarketUpdate(tokenSymbol: string = 'XLM'): Promise<string> {
-    // In a real implementation, you'd fetch actual market data
     const mockPrice = tokenSymbol === 'ETH' ? 2850 : 1850;
     const mockChange = Math.random() > 0.5 ? '+' : '-';
     const mockPercent = (Math.random() * 5).toFixed(2);
