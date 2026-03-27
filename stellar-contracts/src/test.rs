@@ -97,6 +97,70 @@ mod tests {
     }
 
     #[test]
+    fn test_unauthorized_set_limit() {
+        let env = Env::default();
+        let (_, bridge, _admin, token_addr, _, _) = setup_bridge(&env, 100);
+        env.set_auths(&[]);
+        let result = bridge.try_set_limit(&token_addr, &500);
+        assert_eq!(result, Err(Ok(Error::Unauthorized)));
+    }
+
+    #[test]
+    fn test_unauthorized_withdraw() {
+        let env = Env::default();
+        let (_, bridge, _admin, token_addr, _, _) = setup_bridge(&env, 100);
+        let to = Address::generate(&env);
+        env.set_auths(&[]);
+        let result = bridge.try_withdraw(&to, &10, &token_addr);
+        assert_eq!(result, Err(Ok(Error::Unauthorized)));
+    }
+
+    #[test]
+    fn test_unauthorized_transfer_admin() {
+        let env = Env::default();
+        let (_, bridge, _admin, _, _, _) = setup_bridge(&env, 100);
+        let new_admin = Address::generate(&env);
+        env.set_auths(&[]);
+        let result = bridge.try_transfer_admin(&new_admin);
+        assert_eq!(result, Err(Ok(Error::Unauthorized)));
+    }
+
+    #[test]
+    fn test_init_zero_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(FiatBridge, ());
+        let bridge = FiatBridgeClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let (token_addr, _token, _token_sac) = create_token(&env, &token_admin);
+        let result = bridge.try_init(&admin, &token_addr, &0);
+        assert_eq!(result, Err(Ok(Error::ZeroAmount)));
+    }
+
+    #[test]
+    fn test_init_negative_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(FiatBridge, ());
+        let bridge = FiatBridgeClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let (token_addr, _token, _token_sac) = create_token(&env, &token_admin);
+        let result = bridge.try_init(&admin, &token_addr, &-1);
+        assert_eq!(result, Err(Ok(Error::ZeroAmount)));
+    }
+
+    #[test]
+    fn test_set_limit_zero() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, bridge, _admin, token_addr, _, _) = setup_bridge(&env, 100);
+        let result = bridge.try_set_limit(&token_addr, &0);
+        assert_eq!(result, Err(Ok(Error::ZeroAmount)));
+    }
+
+    #[test]
     fn test_set_and_get_cooldown() {
         let env = Env::default();
         env.mock_all_auths();

@@ -12,7 +12,7 @@ import {
 const RPC_URL =
   process.env.NEXT_PUBLIC_STELLAR_RPC_URL ||
   'https://soroban-testnet.stellar.org';
-const CONTRACT_ID =
+export const CONTRACT_ID =
   process.env.NEXT_PUBLIC_FIAT_BRIDGE_CONTRACT ||
   'CAWYXBN4PSVXD7NIYEWVFFIIIEUCC6PUN3IMG3J2WHKDB4NVIISMXBPR';
 // XLM SAC address — the token used by the bridge (stored on-chain after init)

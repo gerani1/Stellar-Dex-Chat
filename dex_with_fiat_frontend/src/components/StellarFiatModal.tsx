@@ -15,6 +15,7 @@ import {
 import { useStellarWallet } from '@/contexts/StellarWalletContext';
 import {
   BRIDGE_LIMIT_WARNING_PERCENT,
+  CONTRACT_ID,
   depositToContract,
   withdrawFromContract,
   stroopsToDisplay,
@@ -97,6 +98,7 @@ export default function StellarFiatModal({
   const [riskConfirmation, setRiskConfirmation] = useState('');
   const [lastLoggedRiskAmount, setLastLoggedRiskAmount] = useState('');
   const [feeEstimate, setFeeEstimate] = useState<FeeEstimate | null>(null);
+  const [requiresPreSignConfirmation, setRequiresPreSignConfirmation] = useState(false);
   const [isLoadingFee, setIsLoadingFee] = useState(false);
   const [status, setStatus] = useState<TxStatus>('idle');
   const [txHash, setTxHash] = useState('');
@@ -146,6 +148,7 @@ export default function StellarFiatModal({
     setTxHash('');
     setErrorMsg('');
     setFeeEstimate(null);
+    setRequiresPreSignConfirmation(false);
     setNote('');
     setRiskConfirmation('');
     setLastLoggedRiskAmount('');
@@ -324,8 +327,11 @@ export default function StellarFiatModal({
     !connection.isConnected ||
     (isDepositFlow &&
       (isLoadingBridgeLimit || isLimitUnavailable || isOverLimit)) ||
-    (isRiskyAmount &&
-      riskConfirmation.trim().toUpperCase() !== RISK_CONFIRMATION_PHRASE);
+      (isRiskyAmount &&
+        riskConfirmation.trim().toUpperCase() !== RISK_CONFIRMATION_PHRASE);
+
+  const operationType = isAdminMode ? 'Withdraw' : 'Deposit';
+  const txNetwork = connection.network || 'TESTNET';
 
   useEffect(() => {
     if (
@@ -402,6 +408,11 @@ export default function StellarFiatModal({
       return;
     }
 
+    if (!requiresPreSignConfirmation) {
+      setRequiresPreSignConfirmation(true);
+      return;
+    }
+
     setStatus('loading');
     setErrorMsg('');
 
@@ -475,6 +486,7 @@ export default function StellarFiatModal({
     setStatus('idle');
     setTxHash('');
     setErrorMsg('');
+    setRequiresPreSignConfirmation(false);
     onClose();
   };
 
@@ -699,6 +711,52 @@ export default function StellarFiatModal({
               </div>
             )}
 
+            {requiresPreSignConfirmation && status !== 'loading' && (
+              <div className="theme-surface-muted theme-border mb-4 rounded-xl border px-4 py-3">
+                <h3 className="theme-text-muted text-[10px] font-bold uppercase tracking-widest mb-3">
+                  Pre-Sign Transaction Summary
+                </h3>
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="theme-text-secondary">Operation</span>
+                    <span className="theme-text-primary font-medium">{operationType}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="theme-text-secondary">Amount</span>
+                    <span className="theme-text-primary font-medium">
+                      {stroopsToDisplay(stroopsAmount ?? BigInt(0))} XLM
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="theme-text-secondary">Network</span>
+                    <span className="theme-text-primary font-medium">{txNetwork}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="theme-text-secondary">Contract</span>
+                    <span className="theme-text-primary font-mono text-[10px] break-all text-right">
+                      {CONTRACT_ID}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setRequiresPreSignConfirmation(false)}
+                    className="theme-border theme-text-secondary flex-1 rounded-lg border py-2 text-xs font-medium hover:theme-text-primary transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAction()}
+                    className="theme-primary-button flex-1 rounded-lg py-2 text-xs font-semibold"
+                  >
+                    Confirm & Sign
+                  </button>
+                </div>
+              </div>
+            )}
+
             {isDepositFlow && (
               <div className="theme-surface-muted theme-border mb-4 rounded-xl border px-4 py-3">
                 <div className="flex items-center justify-between mb-3">
@@ -836,7 +894,7 @@ export default function StellarFiatModal({
                 ) : isAdminMode ? (
                   'Withdraw'
                 ) : (
-                  'Deposit'
+                  requiresPreSignConfirmation ? 'Awaiting Confirmation' : 'Review Transaction'
                 )}
               </button>
 
