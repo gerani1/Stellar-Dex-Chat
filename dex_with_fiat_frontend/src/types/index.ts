@@ -29,6 +29,7 @@ export interface ChatMessage {
     lowConfidence?: boolean;
     clarificationQuestion?: string;
     requestStatus?: 'cancelled';
+    status?: 'pending' | 'sent' | 'failed';
   };
 }
 

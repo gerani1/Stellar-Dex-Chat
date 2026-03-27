@@ -126,7 +126,7 @@ fn test_view_functions() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (_, bridge, admin, token_addr, _, _) = setup_bridge(&env, 300);
+    let (_, bridge, admin, _token_addr, _, _) = setup_bridge(&env, 300);
     assert_eq!(bridge.get_admin(), admin);
 }
 
@@ -217,7 +217,7 @@ fn test_transfer_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (_, bridge, admin, _, _, _) = setup_bridge(&env, 100);
+    let (_, bridge, _admin, _, _, _) = setup_bridge(&env, 100);
     let new_admin = Address::generate(&env);
 
     bridge.transfer_admin(&new_admin);
@@ -271,9 +271,9 @@ fn test_insufficient_funds_withdraw() {
     token_sac.mint(&user, &1_000);
     bridge.deposit(&user, &100, &token_addr, &Bytes::new(&env));
 
-    let req_id = bridge.request_withdrawal(&user, &200, &token_addr);
-    let result = bridge.try_execute_withdrawal(&req_id, &None);
-    assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
+    // Requesting more than net deposits (100) should fail due to invariant check
+    let result = bridge.try_request_withdrawal(&user, &200, &token_addr);
+    assert_eq!(result, Err(Ok(Error::NotAllowed)));
 }
 
 #[test]
@@ -332,4 +332,76 @@ fn test_get_config_snapshot() {
     assert_eq!(config.fiat_limit, None);
     assert_eq!(config.oracle, Some(oracle_addr));
     assert_eq!(config.allowlist_enabled, false);
+}
+
+#[test]
+fn test_total_withdrawn_tracking() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, bridge, _, token_addr, token, token_sac) = setup_bridge(&env, 1000);
+    let user = Address::generate(&env);
+    token_sac.mint(&user, &1_000);
+
+    bridge.deposit(&user, &500, &token_addr, &Bytes::new(&env));
+    assert_eq!(bridge.get_total_withdrawn(), 0);
+
+    bridge.withdraw(&user, &200, &token_addr);
+    assert_eq!(bridge.get_total_withdrawn(), 200);
+    assert_eq!(token.balance(&contract_id), 300);
+
+    let req_id = bridge.request_withdrawal(&user, &100, &token_addr);
+    bridge.execute_withdrawal(&req_id, &None);
+    assert_eq!(bridge.get_total_withdrawn(), 300);
+}
+
+#[test]
+fn test_total_liabilities_tracking() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, bridge, _, token_addr, _, token_sac) = setup_bridge(&env, 1000);
+    let user = Address::generate(&env);
+    token_sac.mint(&user, &1_000);
+
+    bridge.deposit(&user, &500, &token_addr, &Bytes::new(&env));
+    assert_eq!(bridge.get_total_liabilities(), 0);
+
+    let req1 = bridge.request_withdrawal(&user, &100, &token_addr);
+    assert_eq!(bridge.get_total_liabilities(), 100);
+
+    let req2 = bridge.request_withdrawal(&user, &50, &token_addr);
+    assert_eq!(bridge.get_total_liabilities(), 150);
+
+    bridge.execute_withdrawal(&req1, &None);
+    assert_eq!(bridge.get_total_liabilities(), 50);
+
+    bridge.cancel_withdrawal(&req2);
+    assert_eq!(bridge.get_total_liabilities(), 0);
+}
+
+#[test]
+fn test_invariant_violation_insufficent_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, bridge, _, token_addr, token, token_sac) = setup_bridge(&env, 1000);
+    let user = Address::generate(&env);
+    token_sac.mint(&user, &1_000);
+
+    bridge.deposit(&user, &500, &token_addr, &Bytes::new(&env));
+    
+    // Manually burn some tokens from the contract to break invariant
+    // We need to use the token admin for this (token_sac admin is token_admin)
+    // setup_bridge returns token_admin's address? No, it generates it internally.
+    // Let's just transfer tokens out of the contract without calling the bridge's withdraw.
+    // We'll mock auth for the contract itself.
+    env.as_contract(&contract_id, || {
+        token.transfer(&contract_id, &user, &100);
+    });
+
+    // Now balance < net_deposited (400 < 500)
+    // Any mutation should fail because of check_invariants
+    let result = bridge.try_deposit(&user, &10, &token_addr, &Bytes::new(&env));
+    assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
 }

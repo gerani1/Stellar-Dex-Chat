@@ -192,7 +192,22 @@ What would you like to do today? I'm here to make your XLM-to-fiat journey smoot
         timestamp: new Date(),
       };
 
-      setMessages((prev: ChatMessage[]) => [...prev, userMessage]);
+      const pendingAssistantId = (Date.now() + 1).toString();
+      const pendingAssistantMessage: ChatMessage = {
+        id: pendingAssistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        metadata: {
+          status: 'pending',
+        },
+      };
+
+      setMessages((prev: ChatMessage[]) => [
+        ...prev,
+        userMessage,
+        pendingAssistantMessage,
+      ]);
       setIsLoading(true);
       const requestController = new AbortController();
       activeRequestControllerRef.current = requestController;
@@ -340,34 +355,39 @@ What would you like to do today? I'm here to make your XLM-to-fiat journey smoot
             analysis.extractedData.amountIn ||
             analysis.extractedData.fiatAmount);
 
-        const assistantMessage: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: enhancedResponse,
-          timestamp: new Date(),
-          metadata: {
-            guardrail: analysis.guardrail,
-            transactionData: shouldShowTransactionData
-              ? (analysis.extractedData as TransactionData)
-              : undefined,
-            suggestedActions: generateSuggestedActions(analysis, {
-              isWalletConnected: connection.isConnected,
-              messageCount: newMessageCount,
-              hasTransactionData: !!pendingTransactionData,
-              shouldAutoTrigger: !!shouldAutoTrigger,
-              isAdmin,
-              lowConfidence: needsClarification,
-            }),
-            confirmationRequired:
-              analysis.intent === 'fiat_conversion' || shouldAutoTrigger,
-            autoTriggerTransaction: shouldAutoTrigger,
-            conversationCount: newMessageCount,
-            lowConfidence: needsClarification,
-            clarificationQuestion: clarificationQuestion || undefined,
-          },
-        };
-
-        setMessages((prev: ChatMessage[]) => [...prev, assistantMessage]);
+        setMessages((prev: ChatMessage[]) =>
+          prev.map((m) =>
+            m.id === pendingAssistantId
+              ? {
+                  ...m,
+                  content: enhancedResponse,
+                  metadata: {
+                    ...m.metadata,
+                    status: 'sent',
+                    guardrail: analysis.guardrail,
+                    transactionData: shouldShowTransactionData
+                      ? (analysis.extractedData as TransactionData)
+                      : undefined,
+                    suggestedActions: generateSuggestedActions(analysis, {
+                      isWalletConnected: connection.isConnected,
+                      messageCount: newMessageCount,
+                      hasTransactionData: !!pendingTransactionData,
+                      shouldAutoTrigger: !!shouldAutoTrigger,
+                      isAdmin: conversationState.isAdmin,
+                      lowConfidence: needsClarification,
+                    }),
+                    confirmationRequired:
+                      analysis.intent === 'fiat_conversion' ||
+                      shouldTriggerTransaction,
+                    autoTriggerTransaction: shouldTriggerTransaction,
+                    conversationCount: newMessageCount,
+                    lowConfidence: needsClarification,
+                    clarificationQuestion: clarificationQuestion || undefined,
+                  },
+                }
+              : m,
+          ),
+        );
 
         // Trigger transaction callback if needed
         if (
@@ -384,41 +404,21 @@ What would you like to do today? I'm here to make your XLM-to-fiat journey smoot
           return;
         }
         console.error('Chat error:', error);
-        machine.updateContext({
-          errorMessage: error instanceof Error ? error.message : 'Failed to send message',
-        });
-        machine.transition(ChatEvent.ENCOUNTER_ERROR);
-
-        // Mark the user message with error information
-        setMessages((prev: ChatMessage[]) => {
-          const lastMessageIndex = prev.length - 1;
-          if (lastMessageIndex >= 0 && prev[lastMessageIndex].role === 'user') {
-            const updatedMessages = [...prev];
-            const userMsg = updatedMessages[lastMessageIndex];
-            updatedMessages[lastMessageIndex] = {
-              ...userMsg,
-              error: {
-                message: error instanceof Error ? error.message : 'Failed to send message',
-                timestamp: new Date(),
-                retryAttempts: (userMsg.error?.retryAttempts ?? 0) + 1,
-              },
-              originalPayload: {
-                content: userMsg.content,
-                conversationContext: {
-                  isWalletConnected: connection.isConnected,
-                  walletAddress: connection.address,
-                  previousMessages: messages
-                    .slice(-3)
-                    .map((m: ChatMessage) => ({ role: m.role, content: m.content })),
-                  messageCount: machineState.context.messageCount,
-                  hasTransactionData: !!machineState.context.pendingTransactionData,
-                },
-              },
-            };
-            return updatedMessages;
-          }
-          return prev;
-        });
+        setMessages((prev: ChatMessage[]) =>
+          prev.map((m) =>
+            m.id === pendingAssistantId
+              ? {
+                  ...m,
+                  content:
+                    'Sorry, I encountered an error processing your request. Please try again.',
+                  metadata: {
+                    ...m.metadata,
+                    status: 'failed',
+                  },
+                }
+              : m,
+          ),
+        );
       } finally {
         if (activeRequestControllerRef.current === requestController) {
           activeRequestControllerRef.current = null;
