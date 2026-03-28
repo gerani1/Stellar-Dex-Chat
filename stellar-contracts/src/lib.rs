@@ -1304,6 +1304,18 @@ impl FiatBridge {
         Ok(())
     }
 
+    /// Checks if an address is on the denylist.
+    ///
+    /// Returns `true` if the address has been denied via [`deny_address`],
+    /// `false` otherwise. Denied addresses cannot deposit, withdraw, or
+    /// request withdrawals.
+    ///
+    /// # Arguments
+    /// * `env` - The contract environment
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    /// `true` if the address is denied, `false` otherwise
     pub fn is_denied(env: Env, address: Address) -> bool {
         env.storage().persistent().has(&DataKey::Denied(address))
     }

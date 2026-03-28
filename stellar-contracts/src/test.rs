@@ -1172,6 +1172,26 @@ fn test_denylist_does_not_affect_other_users() {
 }
 
 #[test]
+fn test_is_denied_returns_correct_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, bridge, _, _, _, _) = setup_bridge(&env, 10_000);
+    let user = Address::generate(&env);
+
+    // Initially, user should not be denied
+    assert!(!bridge.is_denied(&user));
+
+    // After denying, should return true
+    bridge.deny_address(&user);
+    assert!(bridge.is_denied(&user));
+
+    // After removing from denylist, should return false again
+    bridge.remove_denied_address(&user);
+    assert!(!bridge.is_denied(&user));
+}
+
+#[test]
 fn test_get_escrow_record() {
     let env = Env::default();
     env.mock_all_auths();
