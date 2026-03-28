@@ -4,6 +4,21 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
+  error?: {
+    message: string;
+    timestamp: Date;
+    retryAttempts: number;
+  };
+  originalPayload?: {
+    content: string;
+    conversationContext?: {
+      isWalletConnected: boolean;
+      walletAddress?: string;
+      previousMessages?: Array<{ role: string; content: string }>;
+      messageCount?: number;
+      hasTransactionData?: boolean;
+    };
+  };
   metadata?: {
     transactionData?: TransactionData;
     suggestedActions?: SuggestedAction[];
@@ -13,6 +28,8 @@ export interface ChatMessage {
     guardrail?: GuardrailResult;
     lowConfidence?: boolean;
     clarificationQuestion?: string;
+    requestStatus?: 'cancelled';
+    status?: 'pending' | 'sent' | 'failed';
   };
 }
 
@@ -24,6 +41,8 @@ export interface ChatSession {
   createdAt: Date;
   lastUpdated: Date;
   walletAddress?: string;
+  pinned?: boolean;
+  pinnedAt?: Date;
 }
 
 export interface ChatHistoryState {

@@ -1,29 +1,43 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from '@/contexts/TranslationContext';
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
+  onCancelRequest?: () => void;
+  onNewChat?: () => void;
+  onOpenHistory?: () => void;
+  onOpenBridgeModal?: () => void;
   isLoading: boolean;
   placeholder?: string;
 }
 
 export default function ChatInput({
   onSendMessage,
+  onCancelRequest,
+  onNewChat,
+  onOpenHistory,
+  onOpenBridgeModal,
   isLoading,
-  placeholder = 'Type your message...',
+  placeholder,
 }: ChatInputProps) {
+  const { t } = useTranslation();
+  const activePlaceholder = placeholder || t('chat.placeholder');
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [showPalette, setShowPalette] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteIndex, setPaletteIndex] = useState(0);
 
   const commands = [
-    { cmd: '/deposit', desc: 'Add funds to your Stellar account' },
-    { cmd: '/rates', desc: 'Check current market conversion rates' },
-    { cmd: '/portfolio', desc: 'View your asset balance and value' },
-    { cmd: '/help', desc: 'Get assistance with platform features' },
+    { cmd: '/deposit', desc: t('common.deposit_desc') || 'Add funds to your Stellar account' },
+    { cmd: '/rates', desc: t('common.rates_desc') || 'Check current market conversion rates' },
+    { cmd: '/portfolio', desc: t('common.portfolio_desc') || 'View your asset balance and value' },
+    { cmd: '/help', desc: t('common.help_desc') || 'Get assistance with platform features' },
   ];
 
   const handleInputChange = (val: string) => {
@@ -54,11 +68,11 @@ export default function ChatInput({
     if (showCommands) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % commands.length);
+        setSelectedIndex((prev: number) => (prev + 1) % commands.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex(
-          (prev) => (prev - 1 + commands.length) % commands.length,
+          (prev: number) => (prev - 1 + commands.length) % commands.length,
         );
       } else if (e.key === 'Enter') {
         e.preventDefault();
@@ -75,11 +89,124 @@ export default function ChatInput({
     }
   };
 
+  const paletteCommands = [
+    {
+      id: 'new_chat',
+      label: t('chat.new_chat'),
+      keywords: 'new chat clear',
+      run: () => onNewChat?.(),
+    },
+    {
+      id: 'switch_thread',
+      label: 'Switch Thread',
+      keywords: 'switch thread history',
+      run: () => onOpenHistory?.(),
+    },
+    {
+      id: 'open_bridge_modal',
+      label: 'Open Bridge Modal',
+      keywords: 'bridge modal deposit',
+      run: () => onOpenBridgeModal?.(),
+    },
+    {
+      id: 'cancel_request',
+      label: 'Cancel Pending Request',
+      keywords: 'cancel stop abort request',
+      run: () => onCancelRequest?.(),
+    },
+  ];
+
+  const normalizedQuery = paletteQuery.trim().toLowerCase();
+  const filteredPalette = paletteCommands.filter((cmd) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+    return (
+      cmd.label.toLowerCase().includes(normalizedQuery) ||
+      cmd.keywords.includes(normalizedQuery)
+    );
+  });
+
+  const executePaletteCommand = (idx: number) => {
+    const selected = filteredPalette[idx];
+    if (!selected) {
+      return;
+    }
+    selected.run();
+    setShowPalette(false);
+    setPaletteQuery('');
+    setPaletteIndex(0);
+  };
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setShowPalette((prev: boolean) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
     <form
       onSubmit={handleSubmit}
       className="theme-surface p-6 transition-colors duration-300 relative"
     >
+      {showPalette && (
+        <div className="absolute inset-x-6 bottom-full mb-3 rounded-xl border theme-surface shadow-2xl z-50">
+          <div className="p-3 border-b">
+            <input
+              value={paletteQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setPaletteQuery(e.target.value);
+                setPaletteIndex(0);
+              }}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setPaletteIndex((prev: number) =>
+                    filteredPalette.length > 0
+                      ? (prev + 1) % filteredPalette.length
+                      : 0,
+                  );
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setPaletteIndex((prev: number) =>
+                    filteredPalette.length > 0
+                      ? (prev - 1 + filteredPalette.length) %
+                        filteredPalette.length
+                      : 0,
+                  );
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  executePaletteCommand(paletteIndex);
+                } else if (e.key === 'Escape') {
+                  setShowPalette(false);
+                }
+              }}
+              autoFocus
+              placeholder="Type a command..."
+              className="theme-input w-full rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            {filteredPalette.map((cmd, i) => (
+              <button
+                key={cmd.id}
+                type="button"
+                onClick={() => executePaletteCommand(i)}
+                className={`w-full text-left px-3 py-2 text-sm ${
+                  i === paletteIndex ? 'bg-blue-600 text-white' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                {cmd.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <AnimatePresence>
         {showCommands && (
           <motion.div
@@ -90,7 +217,7 @@ export default function ChatInput({
           >
             <div className="p-2 border-b bg-gray-50/50">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-2">
-                Commands
+                {t('chat.commands')}
               </span>
             </div>
             {commands.map((c, i) => (
@@ -117,9 +244,9 @@ export default function ChatInput({
         <div className="flex-1 relative">
           <textarea
             value={message}
-            onChange={(e) => handleInputChange(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder}
+            placeholder={activePlaceholder}
             disabled={isLoading}
             className="theme-input w-full resize-none border rounded-lg px-4 py-3 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
             rows={1}
@@ -128,7 +255,7 @@ export default function ChatInput({
               maxHeight: '120px',
               height: 'auto',
             }}
-            onInput={(e) => {
+            onInput={(e: React.FormEvent<HTMLTextAreaElement>) => {
               const target = e.target as HTMLTextAreaElement;
               target.style.height = 'auto';
               target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
@@ -152,9 +279,9 @@ export default function ChatInput({
       {/* Quick suggestions */}
       <div className="flex flex-wrap gap-2 mt-4">
         {[
-          'Convert 100 USDC to USD',
-          'Check conversion rates',
-          'View transaction history',
+          t('chat.suggestions.convert'),
+          t('chat.suggestions.rates'),
+          t('chat.suggestions.portfolio'),
         ].map((suggestion, index) => (
           <button
             key={index}
