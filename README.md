@@ -34,6 +34,9 @@ The project consists of two main components:
 
 The `FiatBridge` contract exposes read-only views intended for operational dashboards.
 
+- `get_accrued_fees(token: Address) -> i128`
+  Returns the total amount of fees currently accrued for the specified token that have not yet been withdrawn by the administrator.
+
 - `get_wq_depth() -> u64`
   Returns the current number of withdrawal requests present in the withdrawal request queue.
 

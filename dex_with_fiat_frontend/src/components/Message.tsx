@@ -9,6 +9,7 @@ import { AlertTriangle, Bot, Clock, Coins, Copy, Check, Link, RotateCcw, User, L
 import React, { useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from '@/contexts/TranslationContext';
+import { motion, useReducedMotion } from 'framer-motion';
 
 interface MessageProps {
   message: ChatMessage;
@@ -18,14 +19,16 @@ interface MessageProps {
     data?: Record<string, unknown>,
   ) => void;
   onRetry?: (messageId: string) => void;
+  shouldAnimate?: boolean;
 }
 
-export default function Message({ message, onActionClick, onRetry }: MessageProps) {
+export default function Message({ message, onActionClick, onRetry, shouldAnimate = false }: MessageProps) {
   const { connection } = useStellarWallet();
   const { isDarkMode } = useTheme();
   const { maskingEnabled, maskingStyle } = useUserPreferences();
   const isUser = message.role === 'user';
   const hasError = !!message.error;
+  const shouldReduceMotion = useReducedMotion();
 
   // Apply masking to message content
   const maskedContent = useMasking(message.content, {
@@ -46,9 +49,29 @@ export default function Message({ message, onActionClick, onRetry }: MessageProp
     });
   }, []);
 
+  const variants = {
+    initial: { 
+      opacity: 0, 
+      y: shouldReduceMotion ? 0 : 20,
+      scale: shouldReduceMotion ? 1 : 0.95
+    },
+    animate: { 
+      opacity: 1, 
+      y: 0,
+      scale: 1,
+      transition: {
+        duration: 0.4,
+        ease: [0.23, 1, 0.32, 1] as const // Custom cubic-bezier for premium feel
+      }
+    }
+  };
+
   return (
-    <div
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-8 animate-fadeIn`}
+    <motion.div
+      initial={shouldAnimate ? "initial" : false}
+      animate="animate"
+      variants={variants}
+      className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-8`}
     >
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
         {/* Avatar */}
@@ -385,6 +408,6 @@ export default function Message({ message, onActionClick, onRetry }: MessageProp
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

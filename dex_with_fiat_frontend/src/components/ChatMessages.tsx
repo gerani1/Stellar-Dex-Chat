@@ -126,6 +126,10 @@ export default function ChatMessages({
   const [isLoaded, setIsLoaded] = useState(false);
   const [prevScrollHeight, setPrevScrollHeight] = useState(0);
   const [shouldPreserveScroll, setShouldPreserveScroll] = useState(false);
+  
+  // Track messages that have already been rendered to avoid re-animating
+  const seenMessageIds = useRef<Set<string>>(new Set());
+  const [isReadyToAnimate, setIsReadyToAnimate] = useState(false);
 
   // Load dismissed cards from localStorage
   useEffect(() => {
@@ -137,8 +141,22 @@ export default function ChatMessages({
         console.error('Failed to parse dismissed cards', e);
       }
     }
+    
+    // Mark initial messages as seen
+    allMessages.forEach(m => seenMessageIds.current.add(m.id));
+    
     setIsLoaded(true);
-  }, []);
+    // Delay setting isReadyToAnimate to ensure initial history is processed
+    const timer = setTimeout(() => setIsReadyToAnimate(true), 100);
+    return () => clearTimeout(timer);
+  }, [allMessages]);
+
+  // Update seen messages whenever visibleMessages changes, but don't trigger re-render
+  useEffect(() => {
+    if (isReadyToAnimate && !isLoadingMore) {
+      visibleMessages.forEach(m => seenMessageIds.current.add(m.id));
+    }
+  }, [visibleMessages, isReadyToAnimate, isLoadingMore]);
 
   const dismissCard = (id: string) => {
     const updated = [...dismissedCards, id];
@@ -168,7 +186,7 @@ export default function ChatMessages({
         return () => clearTimeout(timer);
       }
     }
-  }, [allMessages.length, isLoading, isLoadingMore, shouldPreserveScroll]);
+  }, [allMessages.length, isLoading, isLoadingMore, shouldPreserveScroll, scrollToBottom]);
 
   // Handle scroll preservation when loading more
   useEffect(() => {
@@ -345,6 +363,7 @@ export default function ChatMessages({
               key={message.id}
               message={message}
               onActionClick={onActionClick}
+              shouldAnimate={isReadyToAnimate && !isLoadingMore && !seenMessageIds.current.has(message.id)}
             />
           ))}
         </div>

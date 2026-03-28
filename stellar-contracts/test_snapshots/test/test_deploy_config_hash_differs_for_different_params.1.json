@@ -188,6 +188,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "daily_deposit_limit"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "limit"
                     },
                     "val": {
@@ -400,6 +408,14 @@
               "durability": "persistent",
               "val": {
                 "map": [
+                  {
+                    "key": {
+                      "symbol": "daily_deposit_limit"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
                   {
                     "key": {
                       "symbol": "limit"

@@ -209,7 +209,7 @@ export default function StellarFiatModal({
     return () => {
       cancelled = true;
     };
-  }, [defaultAmount, isAdminMode, isOpen, recipientAddress, refetchStats]);
+  }, [defaultAmount, isAdminMode, isOpen, recipientAddress, refetchStats, connection.network]);
 
   useEffect(() => {
     if (!isOpen) {
