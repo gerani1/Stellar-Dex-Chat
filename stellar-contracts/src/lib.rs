@@ -1523,6 +1523,32 @@ impl FiatBridge {
         Ok(())
     }
 
+    pub fn withdraw_fees_batch(env: Env, to: Address, tokens: Vec<Address>) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        let contract = env.current_contract_address();
+        for token in tokens.iter() {
+            let key = DataKey::FeeVault(token.clone());
+            let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            if current <= 0 {
+                continue;
+            }
+
+            let token_client = token::Client::new(&env, &token);
+            token_client.transfer(&contract, &to, &current);
+            env.storage().persistent().set(&key, &0i128);
+            env.events()
+                .publish((Symbol::new(&env, "fee_wdrw"), to.clone()), current);
+        }
+
+        Ok(())
+    }
+
     pub fn execute_renounce_admin(env: Env) -> Result<(), Error> {
         let admin: Address = env
             .storage()

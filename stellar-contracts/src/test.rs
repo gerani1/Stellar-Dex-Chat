@@ -1418,6 +1418,59 @@ fn test_withdraw_fees_success() {
 }
 
 #[test]
+fn test_withdraw_fees_batch_full_sweep() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, bridge, _, token_a_addr, token_a, token_a_sac) = setup_bridge(&env, 10_000);
+    let token_b_admin = Address::generate(&env);
+    let (token_b_addr, token_b, token_b_sac) = create_token(&env, &token_b_admin);
+    let recipient = Address::generate(&env);
+
+    token_a_sac.mint(&contract_id, &120);
+    token_b_sac.mint(&contract_id, &80);
+
+    bridge.accrue_fee(&token_a_addr, &120);
+    bridge.accrue_fee(&token_b_addr, &80);
+
+    let mut tokens = soroban_sdk::Vec::new(&env);
+    tokens.push_back(token_a_addr.clone());
+    tokens.push_back(token_b_addr.clone());
+
+    bridge.withdraw_fees_batch(&recipient, &tokens);
+
+    assert_eq!(bridge.get_accrued_fees(&token_a_addr), 0);
+    assert_eq!(bridge.get_accrued_fees(&token_b_addr), 0);
+    assert_eq!(token_a.balance(&recipient), 120);
+    assert_eq!(token_b.balance(&recipient), 80);
+}
+
+#[test]
+fn test_withdraw_fees_batch_partial_sweep() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, bridge, _, token_a_addr, token_a, token_a_sac) = setup_bridge(&env, 10_000);
+    let token_b_admin = Address::generate(&env);
+    let (token_b_addr, token_b, _) = create_token(&env, &token_b_admin);
+    let recipient = Address::generate(&env);
+
+    token_a_sac.mint(&contract_id, &200);
+    bridge.accrue_fee(&token_a_addr, &200);
+
+    let mut tokens = soroban_sdk::Vec::new(&env);
+    tokens.push_back(token_a_addr.clone());
+    tokens.push_back(token_b_addr.clone());
+
+    bridge.withdraw_fees_batch(&recipient, &tokens);
+
+    assert_eq!(bridge.get_accrued_fees(&token_a_addr), 0);
+    assert_eq!(bridge.get_accrued_fees(&token_b_addr), 0);
+    assert_eq!(token_a.balance(&recipient), 200);
+    assert_eq!(token_b.balance(&recipient), 0);
+}
+
+#[test]
 fn test_withdraw_fees_exceeds_accrued() {
     let env = Env::default();
     env.mock_all_auths();
