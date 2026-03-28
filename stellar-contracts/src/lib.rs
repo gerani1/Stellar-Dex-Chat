@@ -46,6 +46,7 @@ pub enum Error {
     AddressDenied = 309,
     RescueForbidden = 310,
     CircuitBreakerActive = 311,
+    InvalidMemoHash = 312,
 
     // --- 400 series: Funds & Balances ---
     InsufficientFunds = 401,
@@ -313,6 +314,7 @@ impl FiatBridge {
         memo_hash: Option<BytesN<32>>,
     ) -> Result<BytesN<32>, Error> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        Self::validate_memo_hash(&env, &memo_hash)?;
         from.require_auth();
 
         if amount <= 0 {
@@ -476,6 +478,19 @@ impl FiatBridge {
         Ok(receipt_hash)
     }
 
+    /// Validates that `memo_hash`, when provided, is not all zeros.
+    /// A zero hash (32 bytes of `0x00`) is rejected as it indicates a missing or
+    /// placeholder SHA-256 hash rather than a real external transaction reference.
+    fn validate_memo_hash(env: &Env, memo_hash: &Option<BytesN<32>>) -> Result<(), Error> {
+        if let Some(hash) = memo_hash {
+            let zero_hash = BytesN::from_array(env, &[0u8; 32]);
+            if hash == &zero_hash {
+                return Err(Error::InvalidMemoHash);
+            }
+        }
+        Ok(())
+    }
+
     fn check_invariants(env: &Env, token_addr: &Address) -> Result<(), Error> {
         let config: TokenConfig = env
             .storage()
@@ -555,6 +570,7 @@ impl FiatBridge {
         risk_tier: u32,
     ) -> Result<u64, Error> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        Self::validate_memo_hash(&env, &memo_hash)?;
         let admin: Address = env
             .storage()
             .instance()

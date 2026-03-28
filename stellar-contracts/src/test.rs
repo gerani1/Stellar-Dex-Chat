@@ -2194,6 +2194,61 @@ fn test_get_receipt_by_index_nonexistent_index() {
     assert_eq!(bridge.get_receipt_by_index(&u64::MAX), None);
 }
 
+#[test]
+fn test_memo_hash_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, bridge, _, token_addr, _, token_sac) = setup_bridge(&env, 1000);
+    let user = Address::generate(&env);
+    token_sac.mint(&user, &1_000);
+
+    let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+    let valid_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // deposit: zero hash is rejected
+    let result = bridge.try_deposit(
+        &user,
+        &100,
+        &token_addr,
+        &Bytes::new(&env),
+        &0,
+        &0,
+        &Some(zero_hash.clone()),
+    );
+    assert_eq!(result, Err(Ok(Error::InvalidMemoHash)));
+
+    // deposit: valid hash succeeds
+    bridge.deposit(
+        &user,
+        &100,
+        &token_addr,
+        &Bytes::new(&env),
+        &0,
+        &0,
+        &Some(valid_hash.clone()),
+    );
+
+    // request_withdrawal: zero hash is rejected
+    let result = bridge.try_request_withdrawal(
+        &user,
+        &50,
+        &token_addr,
+        &Some(zero_hash),
+        &0,
+    );
+    assert_eq!(result, Err(Ok(Error::InvalidMemoHash)));
+
+    // request_withdrawal: valid hash succeeds
+    bridge.request_withdrawal(
+        &user,
+        &50,
+        &token_addr,
+        &Some(valid_hash),
+        &0,
+    );
+}
+
 // ── Property-based tests (proptest) ──────────────────────────────────────────
 
 #[cfg(test)]
